@@ -1,10 +1,14 @@
 import { Cube3D } from '/src/cube3d.js';
+import { MoveHistory, invertMoves, optimizeSolution } from '/src/history.js';
 
 class App {
   constructor() {
     this.cube = null;
     this.status = document.getElementById('status');
     this.moveCounter = document.getElementById('move-counter');
+    this.history = new MoveHistory();
+    this.historyScramble = document.getElementById('history-scramble');
+    this.historySolution = document.getElementById('history-solution');
     this.solution = [];
     this.scrambleMoves = [];
     this.currentMoveIndex = 0;
@@ -29,6 +33,10 @@ class App {
     document.getElementById('btn-prev').addEventListener('click', () => this.prev());
     document.getElementById('btn-load').addEventListener('click', () => this.loadFacelet());
     document.getElementById('btn-webcam').addEventListener('click', () => this.webcam());
+    document.getElementById('btn-copy').addEventListener('click', () => this.copyHistory());
+    document.getElementById('btn-invert').addEventListener('click', () => this.invertScramble());
+    document.getElementById('btn-optimize').addEventListener('click', () => this.optimizeSolution());
+    document.getElementById('btn-clear-history').addEventListener('click', () => this.clearHistory());
     
     const speedSlider = document.getElementById('speed-slider');
     speedSlider.addEventListener('input', (e) => {
@@ -67,6 +75,10 @@ class App {
       this.scrambleMoves = data.scramble.split(' ');
       this.solution = [];
       this.currentMoveIndex = 0;
+      
+      // Track history
+      this.history.setScramble(this.scrambleMoves);
+      this.updateHistoryDisplay();
       
       await this.cube.applyMoves(this.scrambleMoves, true);
       this.cube.updateStickers(data.facelet);
@@ -198,6 +210,52 @@ class App {
 
   async webcam() {
     this.setStatus('Webcam feature coming soon! Use the facelet input above.', 'info');
+  }
+
+  // History methods
+  updateHistoryDisplay() {
+    this.historyScramble.textContent = this.history.format(this.history.getScramble());
+    this.historySolution.textContent = this.history.format(this.history.getSolution());
+  }
+
+  copyHistory() {
+    const text = this.history.summary();
+    navigator.clipboard.writeText(text).then(() => {
+      this.setStatus('Copied to clipboard!', 'success');
+    }).catch(() => {
+      this.setStatus('Failed to copy', 'error');
+    });
+  }
+
+  invertScramble() {
+    const scramble = this.history.getScramble();
+    if (scramble.length === 0) {
+      this.setStatus('No scramble to invert', 'error');
+      return;
+    }
+    const inverted = invertMoves(scramble);
+    this.cube.applyMoves(inverted, true);
+    this.history.setScramble(inverted);
+    this.updateHistoryDisplay();
+    this.setStatus('Scramble inverted', 'success');
+  }
+
+  optimizeSolution() {
+    const solution = this.history.getSolution();
+    if (solution.length === 0) {
+      this.setStatus('No solution to optimize', 'error');
+      return;
+    }
+    const result = optimizeSolution(solution);
+    this.history.setSolution(result.moves);
+    this.updateHistoryDisplay();
+    this.setStatus(`Optimized: ${solution.length} → ${result.moves.length} moves (removed ${result.removed})`, 'success');
+  }
+
+  clearHistory() {
+    this.history.clear();
+    this.updateHistoryDisplay();
+    this.setStatus('History cleared', 'info');
   }
 
   setStatus(message, type = 'info') {
