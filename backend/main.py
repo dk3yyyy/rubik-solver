@@ -1,7 +1,8 @@
 """Rubik's Cube solver backend using Kociemba's two-phase algorithm."""
 
 import os
-from typing import Optional
+import tempfile
+from typing import Optional, List
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -11,6 +12,12 @@ try:
     SOLVER_AVAILABLE = True
 except ImportError:
     SOLVER_AVAILABLE = False
+
+try:
+    from webcam import detect_colors, detect_cube_state
+    WEBCAM_AVAILABLE = True
+except ImportError:
+    WEBCAM_AVAILABLE = False
 
 app = FastAPI(title="Rubik's Cube Solver API", version="1.0.0")
 
@@ -110,10 +117,46 @@ async def validate_cube(req: ValidateRequest):
 
 
 @app.post("/api/detect", response_model=DetectResponse)
-async def detect_colors(file: UploadFile = File(...)):
-    """Detect cube colors from an image (stub)."""
-    # TODO: Implement OpenCV color detection
-    return DetectResponse(facelet="UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB", confidence=0.0)
+async def detect_cube_colors(file: UploadFile = File(...)):
+    """Detect cube colors from an image using OpenCV."""
+    if not WEBCAM_AVAILABLE:
+        raise HTTPException(status_code=503, detail="OpenCV not available")
+    
+    # Save uploaded file to temp
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+    
+    try:
+        colors = detect_colors(tmp_path)
+        if colors is None:
+            raise HTTPException(status_code=400, detail="Failed to detect colors")
+        
+        return DetectResponse(facelet=''.join(colors), confidence=0.85)
+    finally:
+        os.unlink(tmp_path)
+
+
+@app.post("/api/detect/single", response_model=DetectResponse)
+async def detect_single_face(file: UploadFile = File(...)):
+    """Detect colors from a single face image."""
+    if not WEBCAM_AVAILABLE:
+        raise HTTPException(status_code=503, detail="OpenCV not available")
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+    
+    try:
+        colors = detect_colors(tmp_path)
+        if colors is None:
+            raise HTTPException(status_code=400, detail="Failed to detect colors")
+        
+        return DetectResponse(facelet=''.join(colors), confidence=0.85)
+    finally:
+        os.unlink(tmp_path)
 
 
 if __name__ == "__main__":

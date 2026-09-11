@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Rubik's Cube Solver</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&family=DM+Mono:wght@400&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800&family=DM+Mono:wght@400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
@@ -30,6 +30,16 @@
         </div>
 
         <div class="controls">
+          <div class="timer-display">
+            <div id="timer" class="timer-time">00:00.00</div>
+          </div>
+
+          <div class="best-times-panel">
+            <h3>Best Times</h3>
+            <div id="best-times" class="best-times-list"></div>
+            <button id="btn-clear-times" class="btn btn-small">Clear</button>
+          </div>
+
           <div class="control-row">
             <button id="btn-scramble" class="btn btn-primary">Scramble</button>
             <button id="btn-solve" class="btn btn-dark">Solve</button>
@@ -37,10 +47,10 @@
           </div>
 
           <div class="control-row playback-controls">
-            <button id="btn-play" class="btn btn-small" disabled>Play</button>
-            <button id="btn-pause" class="btn btn-small" disabled>Pause</button>
-            <button id="btn-next" class="btn btn-small" disabled>Next</button>
-            <button id="btn-prev" class="btn btn-small" disabled>Prev</button>
+            <button id="btn-play" class="btn btn-small">Play</button>
+            <button id="btn-pause" class="btn btn-small">Pause</button>
+            <button id="btn-next" class="btn btn-small">Next</button>
+            <button id="btn-prev" class="btn btn-small">Prev</button>
             <input type="range" id="speed-slider" min="100" max="1000" value="300" class="speed-slider" />
             <span class="speed-label">Speed</span>
           </div>
@@ -52,6 +62,35 @@
 
           <div class="control-row">
             <button id="btn-webcam" class="btn btn-ghost">Scan with webcam</button>
+          </div>
+
+          <div id="webcam-panel" class="webcam-panel" hidden>
+            <video id="webcam-video" autoplay playsinline></video>
+            <div class="webcam-buttons">
+              <button id="webcam-capture" class="btn btn-primary">Capture</button>
+              <button id="webcam-close" class="btn btn-ghost">Close</button>
+            </div>
+            <p class="webcam-hint">Point camera at one face. Capture all 6 faces.</p>
+          </div>
+
+          <div class="history-panel">
+            <h3>Move History</h3>
+            <div class="history-sections">
+              <div class="history-section">
+                <label>Scramble</label>
+                <div id="history-scramble" class="history-moves"></div>
+              </div>
+              <div class="history-section">
+                <label>Solution</label>
+                <div id="history-solution" class="history-moves"></div>
+              </div>
+            </div>
+            <div class="history-actions">
+              <button id="btn-copy" class="btn btn-small">Copy</button>
+              <button id="btn-invert" class="btn btn-small">Invert</button>
+              <button id="btn-optimize" class="btn btn-small">Optimize</button>
+              <button id="btn-clear-history" class="btn btn-small">Clear</button>
+            </div>
           </div>
 
           <div id="status" class="status"></div>

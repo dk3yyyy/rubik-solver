@@ -76,10 +76,102 @@ body {
   pointer-events: none;
 }
 
+/* Timer */
+.timer-display {
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 8px;
+}
+
+.timer-time {
+  font-family: var(--font-mono);
+  font-size: 36px; font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timer-time.running { color: var(--orange); }
+
+.timer-buttons { display: flex; gap: 6px; }
+
 .move-counter {
   background: var(--ink); color: #fff;
   padding: 6px 12px; border-radius: 7px;
   font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+}
+
+/* History Panel */
+.history-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 8px;
+}
+
+.history-panel h3 {
+  font-size: 14px; font-weight: 600; margin-bottom: 12px;
+  color: var(--ink);
+}
+
+.history-sections {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-bottom: 12px;
+}
+
+.history-section {
+  display: flex; flex-direction: column; gap: 4px;
+}
+
+.history-section label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  color: var(--muted); letter-spacing: 0.04em;
+}
+
+.history-moves {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--ink); background: var(--paper);
+  padding: 8px; border-radius: 6px; min-height: 32px;
+  word-break: break-all; line-height: 1.4;
+  border: 1px solid var(--line);
+}
+
+.history-actions {
+  display: flex; gap: 6px;
+}
+
+/* Webcam Panel */
+.webcam-panel {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.webcam-panel video {
+  width: 100%;
+  max-width: 320px;
+  border-radius: 7px;
+  display: block;
+  margin: 0 auto;
+}
+
+.webcam-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.webcam-hint {
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 8px;
 }
 
 /* Controls */
