@@ -76,11 +76,25 @@ body {
   pointer-events: none;
 }
 
-.move-counter {
-  background: var(--ink); color: #fff;
-  padding: 6px 12px; border-radius: 7px;
-  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+/* Timer */
+.timer-display {
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 8px;
 }
+
+.timer-time {
+  font-family: var(--font-mono);
+  font-size: 36px; font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timer-time.running { color: var(--orange); }
+
+.timer-buttons { display: flex; gap: 6px; }
 
 /* Controls */
 .controls {
