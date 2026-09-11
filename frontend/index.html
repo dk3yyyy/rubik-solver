@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Rubik's Cube Solver</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&family=DM+Mono:wght@400&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800&family=DM+Mono:wght@400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
@@ -32,11 +32,12 @@
         <div class="controls">
           <div class="timer-display">
             <div id="timer" class="timer-time">00:00.00</div>
-            <div class="timer-buttons">
-              <button id="btn-timer-start" class="btn btn-small">Start</button>
-              <button id="btn-timer-stop" class="btn btn-small">Stop</button>
-              <button id="btn-timer-reset" class="btn btn-small">Reset</button>
-            </div>
+          </div>
+
+          <div class="best-times-panel">
+            <h3>Best Times</h3>
+            <div id="best-times" class="best-times-list"></div>
+            <button id="btn-clear-times" class="btn btn-small">Clear</button>
           </div>
 
           <div class="control-row">
@@ -46,10 +47,10 @@
           </div>
 
           <div class="control-row playback-controls">
-            <button id="btn-play" class="btn btn-small" disabled>Play</button>
-            <button id="btn-pause" class="btn btn-small" disabled>Pause</button>
-            <button id="btn-next" class="btn btn-small" disabled>Next</button>
-            <button id="btn-prev" class="btn btn-small" disabled>Prev</button>
+            <button id="btn-play" class="btn btn-small">Play</button>
+            <button id="btn-pause" class="btn btn-small">Pause</button>
+            <button id="btn-next" class="btn btn-small">Next</button>
+            <button id="btn-prev" class="btn btn-small">Prev</button>
             <input type="range" id="speed-slider" min="100" max="1000" value="300" class="speed-slider" />
             <span class="speed-label">Speed</span>
           </div>

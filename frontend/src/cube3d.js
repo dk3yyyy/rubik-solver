@@ -10,49 +10,37 @@ const COLORS = {
   interior: 0x1a1a1a
 };
 
-const FACE_CHARS = { U: 'U', D: 'D', F: 'F', B: 'B', L: 'L', R: 'R' };
-
-// Facelet index → { face, cubiePos, stickerIndex }
-// Facelet string layout (54 chars, 9 per face):
-//         U0 U1 U2
-//         U3 U4 U5
-//         U6 U7 U8
-// L0 L1 L2 F0 F1 F2 R0 R1 R2 B0 B1 B2
-// L3 L4 L5 F3 F4 F5 R3 R4 R5 B3 B4 B5
-// L6 L7 L8 F6 F7 F8 R6 R7 R8 B6 B7 B8
-//         D0 D1 D2
-//         D3 D4 D5
-//         D6 D7 D8
+// Facelet index → { face, cubiePos }
 const FACELET_MAP = {
   U: [
-    { pos: [-1, 1, 1], row: 0, col: 0 }, { pos: [0, 1, 1], row: 0, col: 1 }, { pos: [1, 1, 1], row: 0, col: 2 },
-    { pos: [-1, 1, 0], row: 1, col: 0 }, { pos: [0, 1, 0], row: 1, col: 1 }, { pos: [1, 1, 0], row: 1, col: 2 },
-    { pos: [-1, 1, -1], row: 2, col: 0 }, { pos: [0, 1, -1], row: 2, col: 1 }, { pos: [1, 1, -1], row: 2, col: 2 }
+    { pos: [-1, 1, 1] }, { pos: [0, 1, 1] }, { pos: [1, 1, 1] },
+    { pos: [-1, 1, 0] }, { pos: [0, 1, 0] }, { pos: [1, 1, 0] },
+    { pos: [-1, 1, -1] }, { pos: [0, 1, -1] }, { pos: [1, 1, -1] }
   ],
   R: [
-    { pos: [1, 1, 1], row: 0, col: 0 }, { pos: [1, 1, 0], row: 0, col: 1 }, { pos: [1, 1, -1], row: 0, col: 2 },
-    { pos: [1, 0, 1], row: 1, col: 0 }, { pos: [1, 0, 0], row: 1, col: 1 }, { pos: [1, 0, -1], row: 1, col: 2 },
-    { pos: [1, -1, 1], row: 2, col: 0 }, { pos: [1, -1, 0], row: 2, col: 1 }, { pos: [1, -1, -1], row: 2, col: 2 }
+    { pos: [1, 1, 1] }, { pos: [1, 1, 0] }, { pos: [1, 1, -1] },
+    { pos: [1, 0, 1] }, { pos: [1, 0, 0] }, { pos: [1, 0, -1] },
+    { pos: [1, -1, 1] }, { pos: [1, -1, 0] }, { pos: [1, -1, -1] }
   ],
   F: [
-    { pos: [-1, 1, 1], row: 0, col: 0 }, { pos: [0, 1, 1], row: 0, col: 1 }, { pos: [1, 1, 1], row: 0, col: 2 },
-    { pos: [-1, 0, 1], row: 1, col: 0 }, { pos: [0, 0, 1], row: 1, col: 1 }, { pos: [1, 0, 1], row: 1, col: 2 },
-    { pos: [-1, -1, 1], row: 2, col: 0 }, { pos: [0, -1, 1], row: 2, col: 1 }, { pos: [1, -1, 1], row: 2, col: 2 }
+    { pos: [-1, 1, 1] }, { pos: [0, 1, 1] }, { pos: [1, 1, 1] },
+    { pos: [-1, 0, 1] }, { pos: [0, 0, 1] }, { pos: [1, 0, 1] },
+    { pos: [-1, -1, 1] }, { pos: [0, -1, 1] }, { pos: [1, -1, 1] }
   ],
   D: [
-    { pos: [-1, -1, 1], row: 0, col: 0 }, { pos: [0, -1, 1], row: 0, col: 1 }, { pos: [1, -1, 1], row: 0, col: 2 },
-    { pos: [-1, -1, 0], row: 1, col: 0 }, { pos: [0, -1, 0], row: 1, col: 1 }, { pos: [1, -1, 0], row: 1, col: 2 },
-    { pos: [-1, -1, -1], row: 2, col: 0 }, { pos: [0, -1, -1], row: 2, col: 1 }, { pos: [1, -1, -1], row: 2, col: 2 }
+    { pos: [-1, -1, 1] }, { pos: [0, -1, 1] }, { pos: [1, -1, 1] },
+    { pos: [-1, -1, 0] }, { pos: [0, -1, 0] }, { pos: [1, -1, 0] },
+    { pos: [-1, -1, -1] }, { pos: [0, -1, -1] }, { pos: [1, -1, -1] }
   ],
   L: [
-    { pos: [-1, 1, -1], row: 0, col: 0 }, { pos: [-1, 1, 0], row: 0, col: 1 }, { pos: [-1, 1, 1], row: 0, col: 2 },
-    { pos: [-1, 0, -1], row: 1, col: 0 }, { pos: [-1, 0, 0], row: 1, col: 1 }, { pos: [-1, 0, 1], row: 1, col: 2 },
-    { pos: [-1, -1, -1], row: 2, col: 0 }, { pos: [-1, -1, 0], row: 2, col: 1 }, { pos: [-1, -1, 1], row: 2, col: 2 }
+    { pos: [-1, 1, -1] }, { pos: [-1, 1, 0] }, { pos: [-1, 1, 1] },
+    { pos: [-1, 0, -1] }, { pos: [-1, 0, 0] }, { pos: [-1, 0, 1] },
+    { pos: [-1, -1, -1] }, { pos: [-1, -1, 0] }, { pos: [-1, -1, 1] }
   ],
   B: [
-    { pos: [1, 1, -1], row: 0, col: 0 }, { pos: [0, 1, -1], row: 0, col: 1 }, { pos: [-1, 1, -1], row: 0, col: 2 },
-    { pos: [1, 0, -1], row: 1, col: 0 }, { pos: [0, 0, -1], row: 1, col: 1 }, { pos: [-1, 0, -1], row: 1, col: 2 },
-    { pos: [1, -1, -1], row: 2, col: 0 }, { pos: [0, -1, -1], row: 2, col: 1 }, { pos: [-1, -1, -1], row: 2, col: 2 }
+    { pos: [1, 1, -1] }, { pos: [0, 1, -1] }, { pos: [-1, 1, -1] },
+    { pos: [1, 0, -1] }, { pos: [0, 0, -1] }, { pos: [-1, 0, -1] },
+    { pos: [1, -1, -1] }, { pos: [0, -1, -1] }, { pos: [-1, -1, -1] }
   ]
 };
 
@@ -64,11 +52,18 @@ export class Cube3D {
     this.renderer = null;
     this.controls = null;
     this.cubies = [];
+    this.raycaster = new THREE.Raycaster();
+    this.mouse = new THREE.Vector2();
     this.isPlaying = false;
     this.currentMoveIndex = 0;
     this.solution = [];
     this.animationSpeed = 300;
     this.scrambleMoves = [];
+    this.scrambleFacelet = null;
+    this.currentStream = null;
+    this.draggable = true;
+    this.isDragging = false;
+    this.mouseDownPos = { x: 0, y: 0 };
 
     this.init();
   }
@@ -78,15 +73,20 @@ export class Cube3D {
     const height = this.container.clientHeight;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xf8f7f4);
+    this.scene.background = null;
 
-    this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-    this.camera.position.set(5, 5, 5);
+    this.camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 100);
+    this.camera.position.set(5, 4, 6);
     this.camera.lookAt(0, 0, 0);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setSize(width, height);
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.outputEncoding = THREE.sRGBEncoding;
     this.container.appendChild(this.renderer.domElement);
 
     this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
@@ -94,16 +94,58 @@ export class Cube3D {
     this.controls.dampingFactor = 0.05;
     this.controls.minDistance = 4;
     this.controls.maxDistance = 15;
+    this.controls.addEventListener('change', () => this.onControlsChange());
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     this.scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(5, 10, 7);
-    this.scene.add(directionalLight);
+
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.3);
+    hemiLight.position.set(0, 10, 0);
+    this.scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(5, 10, 7);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 50;
+    dirLight.shadow.camera.left = -5;
+    dirLight.shadow.camera.right = 5;
+    dirLight.shadow.camera.top = 5;
+    dirLight.shadow.camera.bottom = -5;
+    dirLight.shadow.bias = -0.0001;
+    this.scene.add(dirLight);
+
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+    fillLight.position.set(-5, 5, -5);
+    this.scene.add(fillLight);
+
+    // Floor
+    const floorGeo = new THREE.PlaneGeometry(20, 20);
+    const floorMat = new THREE.ShadowMaterial({ opacity: 0.15 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -2.5;
+    floor.receiveShadow = true;
+    this.scene.add(floor);
+
+    // Grid
+    const grid = new THREE.GridHelper(10, 20, 0xdddddd, 0xeeeeee);
+    grid.position.y = -2.49;
+    grid.material.opacity = 0.3;
+    grid.material.transparent = true;
+    this.scene.add(grid);
 
     this.createCube();
 
     window.addEventListener('resize', () => this.onResize());
+    this.renderer.domElement.addEventListener('mousedown', (e) => this.onMouseDown(e));
+    this.renderer.domElement.addEventListener('mouseup', (e) => this.onMouseUp(e));
+    this.renderer.domElement.addEventListener('touchstart', (e) => this.onTouchStart(e));
+    this.renderer.domElement.addEventListener('touchend', (e) => this.onTouchEnd(e));
+
     this.animate();
   }
 
@@ -115,17 +157,16 @@ export class Cube3D {
     for (let x = -1; x <= 1; x++) {
       for (let y = -1; y <= 1; y++) {
         for (let z = -1; z <= 1; z++) {
-          const materials = [
-            new THREE.MeshLambertMaterial({ color: COLORS.interior }),
-            new THREE.MeshLambertMaterial({ color: COLORS.interior }),
-            new THREE.MeshLambertMaterial({ color: COLORS.interior }),
-            new THREE.MeshLambertMaterial({ color: COLORS.interior }),
-            new THREE.MeshLambertMaterial({ color: COLORS.interior }),
-            new THREE.MeshLambertMaterial({ color: COLORS.interior })
-          ];
+          const cubieMaterial = new THREE.MeshStandardMaterial({
+            color: COLORS.interior,
+            roughness: 0.5,
+            metalness: 0.1
+          });
 
-          const cubie = new THREE.Mesh(geometry, materials);
+          const cubie = new THREE.Mesh(geometry, cubieMaterial);
           cubie.position.set(x, y, z);
+          cubie.castShadow = true;
+          cubie.receiveShadow = true;
           cubie.userData = { gridPos: { x, y, z } };
 
           // Create 6 stickers as children
@@ -139,7 +180,13 @@ export class Cube3D {
           ];
 
           stickerConfigs.forEach(config => {
-            const sticker = new THREE.Mesh(stickerGeometry, new THREE.MeshLambertMaterial({ color: COLORS.interior }));
+            const sticker = new THREE.Mesh(stickerGeometry, new THREE.MeshStandardMaterial({
+              color: COLORS.interior,
+              roughness: 0.35,
+              metalness: 0.0,
+              emissive: 0x000000,
+              emissiveIntensity: 0.04
+            }));
             sticker.position.set(...config.pos);
             sticker.rotation.set(...config.rot);
             sticker.userData.face = config.face;
@@ -185,6 +232,120 @@ export class Cube3D {
         }
         faceletIdx++;
       }
+    }
+  }
+
+  // Click-to-rotate: detect which face was clicked and apply move
+  onMouseDown(event) {
+    this.mouseDownPos = { x: event.clientX, y: event.clientY };
+    this.isDragging = false;
+  }
+
+  onMouseUp(event) {
+    const dx = event.clientX - this.mouseDownPos.x;
+    const dy = event.clientY - this.mouseDownPos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    if (dist < 5) {
+      // It was a click, not a drag
+      this.handleClick(event);
+    }
+  }
+
+  onTouchStart(event) {
+    if (event.touches.length === 1) {
+      this.mouseDownPos = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+      this.isDragging = false;
+    }
+  }
+
+  onTouchEnd(event) {
+    if (event.changedTouches.length === 1) {
+      const dx = event.changedTouches[0].clientX - this.mouseDownPos.x;
+      const dy = event.changedTouches[0].clientY - this.mouseDownPos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < 10) {
+        this.handleClick(event.changedTouches[0]);
+      }
+    }
+  }
+
+  handleClick(event) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const intersects = this.raycaster.intersectObjects(this.cubies, true);
+
+    if (intersects.length > 0) {
+      const hit = intersects[0];
+      const cubie = hit.object.parent instanceof THREE.Mesh ? hit.object.parent : hit.object;
+      const sticker = hit.object;
+      const face = sticker.userData.face;
+      
+      if (face) {
+        // Determine click position on face to decide move direction
+        const localPoint = hit.point.clone();
+        cubie.worldToLocal(localPoint);
+        
+        // Get face normal in local space
+        const normal = this.getFaceNormal(face);
+        
+        // Offset from center of face
+        const offset = localPoint.clone().sub(new THREE.Vector3(
+          normal.x * 0.5,
+          normal.y * 0.5,
+          normal.z * 0.5
+        ));
+        
+        // Decide between clockwise and counter-clockwise based on click position
+        const move = this.getMoveFromClick(face, offset, normal);
+        if (move) {
+          this.applyMove(move, true);
+          if (this.onMoveApplied) this.onMoveApplied(move);
+        }
+      }
+    }
+  }
+
+  getFaceNormal(face) {
+    const normals = {
+      'U': new THREE.Vector3(0, 1, 0),
+      'D': new THREE.Vector3(0, -1, 0),
+      'F': new THREE.Vector3(0, 0, 1),
+      'B': new THREE.Vector3(0, 0, -1),
+      'R': new THREE.Vector3(1, 0, 0),
+      'L': new THREE.Vector3(-1, 0, 0)
+    };
+    return normals[face] || new THREE.Vector3(0, 0, 0);
+  }
+
+  getMoveFromClick(face, offset, normal) {
+    // Determine if click is on one side or the other of the face diagonal
+    // Simple heuristic: use the dominant axis of offset
+    const absX = Math.abs(offset.x);
+    const absY = Math.abs(offset.y);
+    const absZ = Math.abs(offset.z);
+    
+    // For each face, determine clockwise vs counter-clockwise based on click position
+    const prime = this.shouldPrime(face, offset, normal);
+    return face + (prime ? "'" : '');
+  }
+
+  shouldPrime(face, offset, normal) {
+    // Simple heuristic: use cross product of normal and offset
+    const cross = new THREE.Vector3().crossVectors(normal, offset);
+    
+    switch (face) {
+      case 'U': return cross.z > 0;
+      case 'D': return cross.z < 0;
+      case 'F': return cross.y > 0;
+      case 'B': return cross.y < 0;
+      case 'R': return cross.y < 0;
+      case 'L': return cross.y > 0;
+      default: return false;
     }
   }
 
@@ -296,6 +457,8 @@ export class Cube3D {
       await this.applyMove(move, true);
       this.currentMoveIndex++;
     }
+    
+    return Promise.resolve();
   }
 
   pause() {
@@ -333,19 +496,21 @@ export class Cube3D {
     this.currentMoveIndex = 0;
     this.isPlaying = false;
     this.scrambleMoves = [];
+    this.scrambleFacelet = null;
 
-    // Reset all cubies to solved positions
     this.cubies.forEach(c => {
       c.rotation.set(0, 0, 0);
-      // Reset grid positions
       const x = Math.round(c.position.x);
       const y = Math.round(c.position.y);
       const z = Math.round(c.position.z);
       c.userData.gridPos = { x, y, z };
     });
 
-    // Reset sticker colors to solved state
     this.updateStickers('UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB');
+  }
+
+  onControlsChange() {
+    // Used by OrbitControls
   }
 
   onResize() {
