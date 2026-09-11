@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rubik's Cube Solver</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800&family=DM+Mono:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="site-header content-width">
+      <div class="logo">
+        <span class="logo-mark" aria-hidden="true"><span>RC</span></span>
+        <span class="logo-text">rubik<span class="logo-period">.</span></span>
+      </div>
+    </header>
+
+    <main>
+      <section id="solver" class="solver-section content-width">
+        <div class="cube-container">
+          <div id="cube-canvas"></div>
+          <div class="cube-overlay">
+            <div id="move-counter" class="move-counter">0 moves</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div class="timer-display">
+            <div id="timer" class="timer-time">00:00.00</div>
+          </div>
+
+          <div class="best-times-panel">
+            <h3>Best Times</h3>
+            <div id="best-times" class="best-times-list"></div>
+            <button id="btn-clear-times" class="btn btn-small">Clear</button>
+          </div>
+
+          <div class="control-row">
+            <button id="btn-scramble" class="btn btn-primary">Scramble</button>
+            <button id="btn-solve" class="btn btn-dark">Solve</button>
+            <button id="btn-reset" class="btn btn-ghost">Reset</button>
+          </div>
+
+          <div class="control-row playback-controls">
+            <button id="btn-play" class="btn btn-small">Play</button>
+            <button id="btn-pause" class="btn btn-small">Pause</button>
+            <button id="btn-next" class="btn btn-small">Next</button>
+            <button id="btn-prev" class="btn btn-small">Prev</button>
+          </div>
+
+          <div class="control-row">
+            <input type="text" id="facelet-input" class="text-input" placeholder="Paste 54-char facelet string..." maxlength="54">
+            <button id="btn-load" class="btn btn-small">Load</button>
+          </div>
+
+          <div class="history-panel">
+            <h3>Move History</h3>
+            <div class="history-sections">
+              <div class="history-section">
+                <label>Scramble</label>
+                <div id="history-scramble" class="history-moves"></div>
+              </div>
+              <div class="history-section">
+                <label>Solution</label>
+                <div id="history-solution" class="history-moves"></div>
+              </div>
+            </div>
+            <div class="history-actions">
+              <button id="btn-copy" class="btn btn-small">Copy</button>
+              <button id="btn-invert" class="btn btn-small">Invert</button>
+              <button id="btn-optimize" class="btn btn-small">Optimize</button>
+              <button id="btn-clear-history" class="btn btn-small">Clear</button>
+            </div>
+          </div>
+
+          <div id="status" class="status"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cubejs@1.3.2/lib/cube.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
