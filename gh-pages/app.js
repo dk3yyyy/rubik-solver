@@ -352,12 +352,12 @@ class App {
   async scramble() {
     this.setStatus('Generating scramble...', 'loading');
     try {
-      const res = await fetch('https://rubik-solver-api.dk3yyyy.repl.co/api/scramble');
       let data;
-      if (res.ok) {
-        data = await res.json();
-      } else {
-        // Fallback: generate locally
+      try {
+        const res = await fetch('https://rubik-solver-api.dk3yyyy.repl.co/api/scramble');
+        if (res.ok) data = await res.json();
+        else throw new Error('API unavailable');
+      } catch {
         const moves = this.generateScramble();
         const cube = new Cube();
         cube.move(moves);
@@ -413,16 +413,15 @@ class App {
     this.setStatus('Solving...', 'loading');
     try {
       let data;
-      const res = await fetch('https://rubik-solver-api.dk3yyyy.repl.co/api/solve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ facelet })
-      });
-      
-      if (res.ok) {
-        data = await res.json();
-      } else {
-        // Fallback: use cubejs
+      try {
+        const res = await fetch('https://rubik-solver-api.dk3yyyy.repl.co/api/solve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ facelet })
+        });
+        if (res.ok) data = await res.json();
+        else throw new Error('API unavailable');
+      } catch {
         const cube = Cube.from(facelet);
         const solution = cube.solve();
         data = { solution: solution, length: solution.split(' ').length };
