@@ -63,6 +63,15 @@
             <button id="btn-webcam" class="btn btn-ghost">Scan with webcam</button>
           </div>
 
+          <div id="webcam-panel" class="webcam-panel" hidden>
+            <video id="webcam-video" autoplay playsinline></video>
+            <div class="webcam-buttons">
+              <button id="webcam-capture" class="btn btn-primary">Capture</button>
+              <button id="webcam-close" class="btn btn-ghost">Close</button>
+            </div>
+            <p class="webcam-hint">Point camera at one face. Capture all 6 faces.</p>
+          </div>
+
           <div class="history-panel">
             <h3>Move History</h3>
             <div class="history-sections">

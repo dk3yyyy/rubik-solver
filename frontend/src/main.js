@@ -36,6 +36,8 @@ class App {
     document.getElementById('btn-prev').addEventListener('click', () => this.prev());
     document.getElementById('btn-load').addEventListener('click', () => this.loadFacelet());
     document.getElementById('btn-webcam').addEventListener('click', () => this.webcam());
+    document.getElementById('webcam-capture').addEventListener('click', () => this.captureFace());
+    document.getElementById('webcam-close').addEventListener('click', () => this.closeWebcam());
     document.getElementById('btn-timer-start').addEventListener('click', () => this.startTimer());
     document.getElementById('btn-timer-stop').addEventListener('click', () => this.stopTimer());
     document.getElementById('btn-timer-reset').addEventListener('click', () => this.resetTimer());
@@ -226,7 +228,56 @@ class App {
   }
 
   async webcam() {
-    this.setStatus('Webcam feature coming soon! Use the facelet input above.', 'info');
+    const panel = document.getElementById('webcam-panel');
+    const video = document.getElementById('webcam-video');
+    
+    panel.hidden = false;
+    
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' } 
+      });
+      video.srcObject = stream;
+      this.currentStream = stream;
+    } catch (err) {
+      this.setStatus('Camera not available: ' + err.message, 'error');
+      panel.hidden = true;
+    }
+  }
+
+  async captureFace() {
+    const video = document.getElementById('webcam-video');
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    
+    canvas.toBlob(async (blob) => {
+      const formData = new FormData();
+      formData.append('file', blob, 'face.jpg');
+      
+      try {
+        const response = await fetch('http://localhost:8000/api/detect/single', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await response.json();
+        this.setStatus(`Detected: ${data.facelet}`, 'success');
+      } catch (err) {
+        this.setStatus('Detection failed: ' + err.message, 'error');
+      }
+    }, 'image/jpeg');
+  }
+
+  closeWebcam() {
+    const panel = document.getElementById('webcam-panel');
+    const video = document.getElementById('webcam-video');
+    if (this.currentStream) {
+      this.currentStream.getTracks().forEach(track => track.stop());
+      this.currentStream = null;
+    }
+    video.srcObject = null;
+    panel.hidden = true;
   }
 
   // Timer methods
