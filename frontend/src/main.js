@@ -1,5 +1,6 @@
 import { Cube3D } from '/src/cube3d.js';
 import { Timer } from '/src/timer.js';
+import { MoveHistory, invertMoves, optimizeSolution } from '/src/history.js';
 
 class App {
   constructor() {
@@ -8,6 +9,9 @@ class App {
     this.moveCounter = document.getElementById('move-counter');
     this.timer = new Timer();
     this.timerDisplay = document.getElementById('timer');
+    this.history = new MoveHistory();
+    this.historyScramble = document.getElementById('history-scramble');
+    this.historySolution = document.getElementById('history-solution');
     this.solution = [];
     this.scrambleMoves = [];
     this.currentMoveIndex = 0;
@@ -35,6 +39,10 @@ class App {
     document.getElementById('btn-timer-start').addEventListener('click', () => this.startTimer());
     document.getElementById('btn-timer-stop').addEventListener('click', () => this.stopTimer());
     document.getElementById('btn-timer-reset').addEventListener('click', () => this.resetTimer());
+    document.getElementById('btn-copy').addEventListener('click', () => this.copyHistory());
+    document.getElementById('btn-invert').addEventListener('click', () => this.invertScramble());
+    document.getElementById('btn-optimize').addEventListener('click', () => this.optimizeSolution());
+    document.getElementById('btn-clear-history').addEventListener('click', () => this.clearHistory());
     
     const speedSlider = document.getElementById('speed-slider');
     speedSlider.addEventListener('input', (e) => {
@@ -79,6 +87,10 @@ class App {
       this.timer.start();
       this.updateTimerDisplay();
       
+      // Track history
+      this.history.setScramble(this.scrambleMoves);
+      this.updateHistoryDisplay();
+      
       await this.cube.applyMoves(this.scrambleMoves, true);
       this.cube.updateStickers(data.facelet);
       this.cube.scrambleFacelet = data.facelet;
@@ -94,10 +106,7 @@ class App {
     const faceletInput = document.getElementById('facelet-input');
     let facelet = faceletInput.value.trim();
     
-    // If no facelet provided, use current cube state from scramble
     if (!facelet || facelet.length !== 54) {
-      // For now, we need to track state - require user to paste facelet
-      // or use the scramble facelet
       if (this.cube.scrambleFacelet) {
         facelet = this.cube.scrambleFacelet;
       } else {
@@ -133,13 +142,18 @@ class App {
   play() {
     if (this.solution.length > 0) {
       this.isPlaying = true;
-      this.cube.playSolution(this.solution.slice(this.currentMoveIndex));
+      this.cube.playSolution(this.solution.slice(this.currentMoveIndex)).then(() => {
+        this.stopTimer();
+        this.isPlaying = false;
+      });
     }
   }
 
   pause() {
     this.isPlaying = false;
     this.cube.pause();
+    this.timer.stop();
+    this.updateTimerDisplay();
   }
 
   next() {
@@ -170,6 +184,10 @@ class App {
     this.scrambleMoves = [];
     this.currentMoveIndex = 0;
     this.isPlaying = false;
+    this.timer.reset();
+    this.updateTimerDisplay();
+    this.history.clear();
+    this.updateHistoryDisplay();
     this.moveCounter.textContent = '0 moves';
     this.setStatus('Reset to solved state', 'info');
   }
@@ -232,6 +250,52 @@ class App {
     if (this.timer.running) {
       requestAnimationFrame(() => this.updateTimerDisplay());
     }
+  }
+
+  // History methods
+  updateHistoryDisplay() {
+    this.historyScramble.textContent = this.history.format(this.history.getScramble());
+    this.historySolution.textContent = this.history.format(this.history.getSolution());
+  }
+
+  copyHistory() {
+    const text = this.history.summary();
+    navigator.clipboard.writeText(text).then(() => {
+      this.setStatus('Copied to clipboard!', 'success');
+    }).catch(() => {
+      this.setStatus('Failed to copy', 'error');
+    });
+  }
+
+  invertScramble() {
+    const scramble = this.history.getScramble();
+    if (scramble.length === 0) {
+      this.setStatus('No scramble to invert', 'error');
+      return;
+    }
+    const inverted = invertMoves(scramble);
+    this.cube.applyMoves(inverted, true);
+    this.history.setScramble(inverted);
+    this.updateHistoryDisplay();
+    this.setStatus('Scramble inverted', 'success');
+  }
+
+  optimizeSolution() {
+    const solution = this.history.getSolution();
+    if (solution.length === 0) {
+      this.setStatus('No solution to optimize', 'error');
+      return;
+    }
+    const result = optimizeSolution(solution);
+    this.history.setSolution(result.moves);
+    this.updateHistoryDisplay();
+    this.setStatus(`Optimized: ${solution.length} → ${result.moves.length} moves (removed ${result.removed})`, 'success');
+  }
+
+  clearHistory() {
+    this.history.clear();
+    this.updateHistoryDisplay();
+    this.setStatus('History cleared', 'info');
   }
 
   setStatus(message, type = 'info') {
