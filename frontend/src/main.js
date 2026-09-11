@@ -1,10 +1,13 @@
 import { Cube3D } from '/src/cube3d.js';
+import { Timer } from '/src/timer.js';
 
 class App {
   constructor() {
     this.cube = null;
     this.status = document.getElementById('status');
     this.moveCounter = document.getElementById('move-counter');
+    this.timer = new Timer();
+    this.timerDisplay = document.getElementById('timer');
     this.solution = [];
     this.scrambleMoves = [];
     this.currentMoveIndex = 0;
@@ -29,6 +32,9 @@ class App {
     document.getElementById('btn-prev').addEventListener('click', () => this.prev());
     document.getElementById('btn-load').addEventListener('click', () => this.loadFacelet());
     document.getElementById('btn-webcam').addEventListener('click', () => this.webcam());
+    document.getElementById('btn-timer-start').addEventListener('click', () => this.startTimer());
+    document.getElementById('btn-timer-stop').addEventListener('click', () => this.stopTimer());
+    document.getElementById('btn-timer-reset').addEventListener('click', () => this.resetTimer());
     
     const speedSlider = document.getElementById('speed-slider');
     speedSlider.addEventListener('input', (e) => {
@@ -67,6 +73,11 @@ class App {
       this.scrambleMoves = data.scramble.split(' ');
       this.solution = [];
       this.currentMoveIndex = 0;
+      
+      // Auto-start timer
+      this.timer.reset();
+      this.timer.start();
+      this.updateTimerDisplay();
       
       await this.cube.applyMoves(this.scrambleMoves, true);
       this.cube.updateStickers(data.facelet);
@@ -198,6 +209,29 @@ class App {
 
   async webcam() {
     this.setStatus('Webcam feature coming soon! Use the facelet input above.', 'info');
+  }
+
+  // Timer methods
+  startTimer() {
+    this.timer.start();
+    this.updateTimerDisplay();
+  }
+
+  stopTimer() {
+    this.timer.stop();
+    this.updateTimerDisplay();
+  }
+
+  resetTimer() {
+    this.timer.reset();
+    this.updateTimerDisplay();
+  }
+
+  updateTimerDisplay() {
+    this.timer.updateDisplay(this.timerDisplay);
+    if (this.timer.running) {
+      requestAnimationFrame(() => this.updateTimerDisplay());
+    }
   }
 
   setStatus(message, type = 'info') {
