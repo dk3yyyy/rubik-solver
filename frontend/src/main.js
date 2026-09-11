@@ -1,0 +1,221 @@
+import { Cube3D } from '/src/cube3d.js';
+
+class App {
+  constructor() {
+    this.cube = null;
+    this.status = document.getElementById('status');
+    this.moveCounter = document.getElementById('move-counter');
+    this.solution = [];
+    this.scrambleMoves = [];
+    this.currentMoveIndex = 0;
+    this.isPlaying = false;
+    this.init();
+  }
+
+  init() {
+    const canvasContainer = document.getElementById('cube-canvas');
+    this.cube = new Cube3D(canvasContainer);
+    this.bindEvents();
+    this.setStatus('Ready. Click "Scramble" to start, or paste a facelet string.', 'info');
+  }
+
+  bindEvents() {
+    document.getElementById('btn-scramble').addEventListener('click', () => this.scramble());
+    document.getElementById('btn-solve').addEventListener('click', () => this.solve());
+    document.getElementById('btn-reset').addEventListener('click', () => this.reset());
+    document.getElementById('btn-play').addEventListener('click', () => this.play());
+    document.getElementById('btn-pause').addEventListener('click', () => this.pause());
+    document.getElementById('btn-next').addEventListener('click', () => this.next());
+    document.getElementById('btn-prev').addEventListener('click', () => this.prev());
+    document.getElementById('btn-load').addEventListener('click', () => this.loadFacelet());
+    document.getElementById('btn-webcam').addEventListener('click', () => this.webcam());
+    
+    const speedSlider = document.getElementById('speed-slider');
+    speedSlider.addEventListener('input', (e) => {
+      this.cube.setSpeed(1100 - parseInt(e.target.value));
+    });
+
+    document.getElementById('facelet-input').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') this.loadFacelet();
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      const moveKeys = {
+        'u': "U'", 'U': 'U',
+        'd': "D'", 'D': 'D',
+        'l': "L'", 'L': 'L',
+        'r': "R'", 'R': 'R',
+        'f': "F'", 'F': 'F',
+        'b': "B'", 'B': 'B'
+      };
+      
+      if (moveKeys[e.key] && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault();
+        this.cube.applyMove(moveKeys[e.key], true);
+      }
+    });
+  }
+
+  async scramble() {
+    this.setStatus('Generating scramble...', 'loading');
+    try {
+      const response = await fetch('http://localhost:8000/api/scramble');
+      const data = await response.json();
+      
+      this.cube.reset();
+      this.scrambleMoves = data.scramble.split(' ');
+      this.solution = [];
+      this.currentMoveIndex = 0;
+      
+      await this.cube.applyMoves(this.scrambleMoves, true);
+      this.cube.updateStickers(data.facelet);
+      this.cube.scrambleFacelet = data.facelet;
+      
+      this.moveCounter.textContent = `Scrambled: ${this.scrambleMoves.length} moves`;
+      this.setStatus('Scrambled! Now click "Solve" or "Play" to see the solution.', 'success');
+    } catch (err) {
+      this.setStatus('Error: ' + err.message, 'error');
+    }
+  }
+
+  async solve() {
+    const faceletInput = document.getElementById('facelet-input');
+    let facelet = faceletInput.value.trim();
+    
+    // If no facelet provided, use current cube state from scramble
+    if (!facelet || facelet.length !== 54) {
+      // For now, we need to track state - require user to paste facelet
+      // or use the scramble facelet
+      if (this.cube.scrambleFacelet) {
+        facelet = this.cube.scrambleFacelet;
+      } else {
+        this.setStatus('Please enter a 54-char facelet string first', 'error');
+        return;
+      }
+    }
+    
+    this.setStatus('Solving...', 'loading');
+    try {
+      const response = await fetch('http://localhost:8000/api/solve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ facelet })
+      });
+      
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || 'Solve failed');
+      }
+      
+      const data = await response.json();
+      this.solution = data.solution.split(' ');
+      this.currentMoveIndex = 0;
+      
+      this.moveCounter.textContent = `${data.length} moves`;
+      this.setStatus(`Solution: ${data.solution}`, 'success');
+    } catch (err) {
+      this.setStatus('Error: ' + err.message, 'error');
+    }
+  }
+
+  play() {
+    if (this.solution.length > 0) {
+      this.isPlaying = true;
+      this.cube.playSolution(this.solution.slice(this.currentMoveIndex));
+    }
+  }
+
+  pause() {
+    this.isPlaying = false;
+    this.cube.pause();
+  }
+
+  next() {
+    if (this.currentMoveIndex < this.solution.length) {
+      this.cube.applyMove(this.solution[this.currentMoveIndex], true);
+      this.currentMoveIndex++;
+      this.updateMoveCounter();
+    }
+  }
+
+  prev() {
+    if (this.currentMoveIndex > 0) {
+      const move = this.solution[this.currentMoveIndex - 1];
+      const inverse = move.includes("'") ? move.replace("'", "") : move + "'";
+      this.cube.applyMove(inverse, true);
+      this.currentMoveIndex--;
+      this.updateMoveCounter();
+    }
+  }
+
+  updateMoveCounter() {
+    this.moveCounter.textContent = `Move ${this.currentMoveIndex}/${this.solution.length}`;
+  }
+
+  reset() {
+    this.cube.reset();
+    this.solution = [];
+    this.scrambleMoves = [];
+    this.currentMoveIndex = 0;
+    this.isPlaying = false;
+    this.moveCounter.textContent = '0 moves';
+    this.setStatus('Reset to solved state', 'info');
+  }
+
+  async loadFacelet() {
+    const faceletInput = document.getElementById('facelet-input');
+    const facelet = faceletInput.value.trim();
+    
+    if (facelet.length !== 54) {
+      this.setStatus('Facelet string must be exactly 54 characters', 'error');
+      return;
+    }
+    
+    this.setStatus('Validating...', 'loading');
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ facelet })
+      });
+      
+      const data = await response.json();
+      
+      if (!data.valid) {
+        this.setStatus('Invalid cube: ' + data.error, 'error');
+        return;
+      }
+      
+      this.cube.reset();
+      this.cube.updateStickers(facelet);
+      this.setStatus('Cube loaded!', 'success');
+    } catch (err) {
+      this.setStatus('Error: ' + err.message, 'error');
+    }
+  }
+
+  async webcam() {
+    this.setStatus('Webcam feature coming soon! Use the facelet input above.', 'info');
+  }
+
+  setStatus(message, type = 'info') {
+    this.status.textContent = message;
+    this.status.className = `status status-${type}`;
+    
+    if (type === 'success' || type === 'error') {
+      setTimeout(() => {
+        if (this.status.textContent === message) {
+          this.status.textContent = '';
+          this.status.className = 'status';
+        }
+      }, 8000);
+    }
+  }
+}
+
+// Initialize app when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  new App();
+});
