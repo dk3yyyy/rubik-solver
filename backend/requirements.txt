@@ -3,4 +3,7 @@ uvicorn==0.30.6
 rubik-solver-py==0.1.1
 python-multipart==0.0.9
 opencv-python==4.10.0.84
-numpy==1.26.4
+# numpy 1.26.4 has no wheels for Python 3.13+ and a source build on 3.14
+# corrupts rubik_solver's pruning-table construction, so init_solver() dies
+# with IndexError and every solver endpoint returns 503. 2.1+ is required.
+numpy>=2.1
