@@ -23,7 +23,9 @@
       <nav class="primary-nav" aria-label="Main navigation">
         <a href="#solver">Solver</a>
         <a href="#how-it-works">How it works</a>
-        <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode" type="button">🌙</button>
+        <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode" type="button">
+          <span id="theme-icon">🌙</span>
+        </button>
         <button id="cb-toggle" class="cb-toggle" aria-label="Toggle colorblind-friendly palette" aria-pressed="false" type="button">👁</button>
       </nav>
     </header>
@@ -52,6 +54,7 @@
             <button id="btn-scramble" class="btn btn-primary" type="button">Scramble</button>
             <button id="btn-solve" class="btn btn-dark" type="button">Solve</button>
             <button id="btn-reset" class="btn btn-ghost" type="button">Reset</button>
+            <button id="btn-undo" class="btn btn-undo" disabled type="button">Undo</button>
           </div>
 
           <div class="control-row playback-controls">
@@ -62,6 +65,11 @@
             <label for="speed-slider" class="sr-only">Playback speed</label>
             <input type="range" id="speed-slider" min="100" max="3000" step="50" value="600" class="speed-slider" aria-label="Playback speed" />
             <span id="speed-label" class="speed-label">0.60s per move</span>
+          </div>
+
+          <div id="move-preview" class="move-preview" hidden>
+            <span class="move-preview-label">Next:</span>
+            <span id="move-preview-moves"></span>
           </div>
 
           <div class="control-row">
