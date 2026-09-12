@@ -1,5 +1,7 @@
 # Rubik's Cube Solver
 
+[![tests](https://github.com/dk3yyyy/rubik-solver/actions/workflows/tests.yml/badge.svg)](https://github.com/dk3yyyy/rubik-solver/actions/workflows/tests.yml)
+
 A full-stack web application that solves Rubik's cubes using a Three.js 3D frontend and a FastAPI backend powered by a Kociemba-inspired two-phase solver.
 
 ---
@@ -182,12 +184,20 @@ rubik-solver/
 │       └── facelets.json        # Expected facelets generated from the solver
 │
 ├── README.md
+├── render.yaml                  # One Render service: builds the frontend, serves it with the API
+├── .github/
+│   └── workflows/
+│       └── tests.yml            # Both suites plus a production build, on every PR
 └── .gitignore
 ```
 
 ---
 
 ## Testing
+
+CI runs both suites on every pull request and on `master`
+(`.github/workflows/tests.yml`): the backend on Python 3.11 and 3.12, and the
+frontend on Node 22 including a production build. Run them the same way locally:
 
 ### Backend
 
