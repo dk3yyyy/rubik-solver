@@ -5,8 +5,12 @@ import {
   FACE_CELLS,
   FACE_COLOURS,
   FACE_NORMALS,
+  SCAN_FACES,
   STICKER_PLACEMENTS,
+  captureHint,
   describeApiError,
+  describeScanError,
+  frameIsBlank,
   invertMove,
   movePlaybackState,
   moveToRotation,
@@ -424,7 +428,7 @@ class App {
 
   bindEvents() {
     document.getElementById('btn-scramble').addEventListener('click', () => this.scramble());
-    document.getElementById('btn-solve').addEventListener('click', () => this.solve());
+    document.getElementById('btn-solve').addEventListener('click', () => this.solveAndPlay());
     document.getElementById('btn-reset').addEventListener('click', () => this.reset());
     document.getElementById('btn-play').addEventListener('click', () => this.play());
     document.getElementById('btn-pause').addEventListener('click', () => this.pause());
@@ -461,7 +465,7 @@ class App {
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        this.solve();
+        this.solveAndPlay();
         return;
       }
       if (e.key === 's' || e.key === 'S') {
@@ -528,6 +532,19 @@ class App {
       this.timer.start();
       this.startTimerDisplay();
     }
+  }
+
+  /**
+   * The Solve button and the Enter key: work the solution out, then run it on the
+   * cube. Computing alone left the cube sitting there scrambled, and because a
+   * scramble already triggers a prediction the button looked like it did nothing.
+   */
+  async solveAndPlay() {
+    await this.solve();
+    if (!this.solution.length || this.isPlaying) return;
+    this.currentMoveIndex = 0;
+    this.updatePlaybackDisplay();
+    await this.play();
   }
 
   async solve() {
@@ -827,37 +844,75 @@ class App {
     this.updateWebcamHint();
     panel.hidden = false;
 
+    // mediaDevices only exists in a secure context, so a phone opening the app
+    // over plain http on the local network has no camera API at all.
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      this.setStatus(
+        'This page cannot reach the camera. Browsers only allow it over https or on '
+        + 'localhost, so open the app at http://localhost:8000 rather than a network address.',
+        'error',
+      );
+      panel.hidden = true;
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       video.srcObject = stream;
       this.currentStream = stream;
+      // autoplay is subject to browser policy. Asking explicitly means a stream
+      // that never starts is reported here, rather than arriving at the scanner
+      // as six black frames it cannot read.
+      await video.play();
     } catch (err) {
-      this.setStatus('Camera: ' + err.message, 'error');
-      panel.hidden = true;
+      this.setStatus('Camera: ' + ((err && err.message) || err), 'error');
+      this.closeWebcam();
     }
   }
 
   async captureFace() {
     const video = document.getElementById('webcam-video');
     if (!video.videoWidth) { this.setStatus('Camera is not ready yet', 'error'); return; }
+    if (video.paused) {
+      this.setStatus('The camera is not running. Close the panel and press "Scan with webcam" again.', 'error');
+      return;
+    }
 
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+
+    // Sample the frame so a camera that is not delivering a picture is caught
+    // here, instead of the scanner reporting stickers it cannot read.
+    const probe = document.createElement('canvas');
+    probe.width = 32;
+    probe.height = 32;
+    const probeCtx = probe.getContext('2d');
+    probeCtx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, 32, 32);
+    if (frameIsBlank(probeCtx.getImageData(0, 0, 32, 32).data)) {
+      this.setStatus(
+        'The camera is showing a blank frame. Check that no other app is using it, then try again.',
+        'error',
+      );
+      return;
+    }
+
     this.capturedFaces.push(canvas.toDataURL('image/jpeg', 0.9));
     this.updateWebcamHint();
 
-    if (this.capturedFaces.length === FACE_COUNT) await this.scanCapturedFaces();
-    else this.setStatus(`Captured face ${this.capturedFaces.length}/${FACE_COUNT}`, 'info');
+    if (this.capturedFaces.length === FACE_COUNT) {
+      await this.scanCapturedFaces();
+    } else {
+      const caught = SCAN_FACES[this.capturedFaces.length - 1];
+      this.setStatus(`Captured ${caught ? caught.colour : 'face'} (${this.capturedFaces.length}/${FACE_COUNT})`, 'info');
+    }
   }
 
   updateWebcamHint() {
     if (!this.webcamHint) return;
-    const done = this.capturedFaces.length;
-    this.webcamHint.textContent = done === 0
-      ? 'Point the camera at one face and capture all six, in order U, R, F, D, L, B.'
-      : `${done}/${FACE_COUNT} faces captured.`;
+    this.webcamHint.textContent = captureHint(this.capturedFaces.length);
   }
 
   async scanCapturedFaces() {
@@ -884,7 +939,7 @@ class App {
       this.capturedFaces = [];
       this.closeWebcam();
     } catch (err) {
-      this.setStatus('Scan failed: ' + this.apiError(err), 'error');
+      this.setStatus('Scan failed: ' + describeScanError(this.apiError(err)), 'error');
       this.capturedFaces = [];
       this.updateWebcamHint();
     }

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from helpers import base64_face, solved_faces
+from helpers import base64_ambiguous_face, base64_face, solved_faces
 import main
 from main import app
 from validator import validate_facelet
@@ -142,6 +142,30 @@ def test_webcam_scan_needs_all_six_faces(client):
     response = client.post("/api/webcam-scan", json={"images": [base64_face("U" * 9)]})
     assert response.status_code == 422
     assert "54" in response.json()["detail"]
+
+
+def test_a_scan_names_the_face_it_could_not_read(client):
+    # One grey face the detector cannot classify. Being told to retake all six
+    # because one face failed is why a scan feels broken.
+    images = solved_faces()
+    images[2] = base64_ambiguous_face()  # the F face
+    response = client.post("/api/webcam-scan", json={"images": images})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "F (9 stickers)" in detail, detail
+    assert "Retake those faces" in detail, detail
+
+
+def test_an_unsolvable_scan_says_what_usually_causes_it(client):
+    images = solved_faces()
+    images[0] = base64_face("RUUUUUUUU")  # one wrong sticker on U
+    response = client.post("/api/webcam-scan", json={"images": images})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "not a solvable cube" in detail, detail
+    assert "quarter turn out" in detail, detail
 
 
 def test_webcam_scan_partial_scan_message_names_the_counts(client):

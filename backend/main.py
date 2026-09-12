@@ -22,7 +22,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +35,10 @@ from validator import FORMAT, NUM_STICKERS, check_facelet, is_solved
 
 # One image per face, six faces on a cube.
 FACE_COUNT = 6
+
+# The order the scanner expects the six images in, which is also the order
+# facelets are written: U, R, F, D, L, B.
+FACE_ORDER = ("U", "R", "F", "D", "L", "B")
 
 try:
     import webcam
@@ -390,12 +394,11 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
                 detail=f"Image payload too large (max ~2 MB base64)"
             )
 
-    face_colors: List[Optional[str]] = []
-    scores: List[float] = []
-    for payload in payloads:
-        colors, confidence = detector.detect_face_colors(_decode_base64_image(payload))
-        face_colors.extend(colors)
-        scores.append(confidence)
+    per_face: List[Tuple[List[Optional[str]], float]] = [
+        detector.detect_face_colors(_decode_base64_image(payload)) for payload in payloads
+    ]
+    face_colors: List[Optional[str]] = [color for colors, _ in per_face for color in colors]
+    scores = [confidence for _, confidence in per_face]
 
     unmatched = sum(1 for color in face_colors if color is None)
     detected = len(face_colors) - unmatched
@@ -410,15 +413,33 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
             ),
         )
     if unmatched:
+        # Name the faces that failed. Being told to retake all six because one
+        # sticker on one face was unreadable is why a scan feels broken.
+        failing = []
+        for index, (colors, _) in enumerate(per_face):
+            missing = sum(1 for color in colors if color is None)
+            if missing:
+                face = FACE_ORDER[index] if index < len(FACE_ORDER) else f"image {index + 1}"
+                failing.append(f"{face} ({missing} sticker{'' if missing == 1 else 's'})")
         raise HTTPException(
             status_code=422,
-            detail=f"Could not classify {unmatched} sticker(s); retake under even lighting",
+            detail=(
+                f"Could not read {unmatched} sticker(s) on face(s) {', '.join(failing)}. "
+                "Retake those faces straight on and evenly lit."
+            ),
         )
 
     state = "".join(color for color in face_colors if color is not None)
     result = check_facelet(state)
     if not result.ok:
-        raise HTTPException(status_code=422, detail=f"Detected state is not solvable: {result.error}")
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Detected state is not a solvable cube: {result.error}. "
+                "The usual cause is a face held a quarter turn out, or the six "
+                "faces captured in a different order than U, R, F, D, L, B."
+            ),
+        )
 
     return WebcamScanResponse(
         state=state, confidence=round(confidence, 3), face_colors=face_colors

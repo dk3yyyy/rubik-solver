@@ -16,17 +16,21 @@ import {
   FACE_NET,
   FACE_NORMALS,
   FACE_ORDER,
+  SCAN_FACES,
   STICKER_COUNT,
   STICKER_PLACEMENTS,
   BackendUnreachable,
   applyMoveToFacelet,
   applyMovesToFacelet,
+  captureHint,
   countColours,
   describeApiError,
   describeInputProblems,
+  describeScanError,
   faceletAt,
   faceletFromStickers,
   formatMove,
+  frameIsBlank,
   invertMove,
   invertSequence,
   isLocalOrigin,
@@ -337,4 +341,43 @@ test('the counter agrees with the mark on the solution', () => {
     assert.equal(playbackCounterText(cursor, 22), cursor === 0 ? '0/22 moves' : `Move ${cursor}/22`);
   }
   assert.equal(playbackCounterText(0, 0), '0 moves');
+});
+
+test('the scan says which face is next and how to hold it', () => {
+  // "3/6 faces captured" left the person working out the order and orientation
+  // themselves, which is the step that produces a cube the solver rejects.
+  assert.ok(captureHint(0).includes('WHITE'));
+  assert.ok(captureHint(0).includes('blue edge up'));
+  assert.ok(captureHint(1).includes('RED'));
+  assert.ok(captureHint(1).includes('1 captured, 5 to go'));
+  assert.ok(captureHint(5).includes('BLUE'));
+  assert.ok(captureHint(6).includes('All six'));
+});
+
+test('the six faces are listed once each, in the order the scanner wants', () => {
+  assert.deepEqual(SCAN_FACES.map((face) => face.letter), ['U', 'R', 'F', 'D', 'L', 'B']);
+  assert.equal(new Set(SCAN_FACES.map((face) => face.colour)).size, 6);
+  // U and D are the two that are not held white up. If a fixture-driven neighbour
+  // ever changes, this is where it shows up.
+  assert.equal(SCAN_FACES.filter((face) => face.hold.includes('white edge up')).length, 4);
+  assert.ok(SCAN_FACES[0].hold.includes('blue edge up'));
+  assert.ok(SCAN_FACES[3].hold.includes('green edge up'));
+});
+
+test('a blank camera frame is caught rather than blamed on the lighting', () => {
+  assert.equal(frameIsBlank(new Uint8ClampedArray(32 * 32 * 4)), true);
+  assert.equal(frameIsBlank(new Uint8ClampedArray(32 * 32 * 4).fill(120)), false);
+  assert.equal(frameIsBlank(null), true);
+  assert.equal(frameIsBlank(new Uint8ClampedArray(0)), true);
+});
+
+test('a geometry failure carries the holding advice, others pass through', () => {
+  const geometry = describeScanError('Detected state is not a solvable cube: Invalid corner piece: those three stickers cannot share a corner.');
+  assert.ok(geometry.includes('Invalid corner piece'));
+  assert.ok(geometry.includes('U then R, F, D, L, B'));
+
+  const lighting = 'Could not read 2 sticker(s) on face(s) R (2 stickers). Retake those faces straight on and evenly lit.';
+  assert.equal(describeScanError(lighting), lighting);
+  assert.ok(describeScanError('').length > 0);
+  assert.ok(describeScanError(undefined).length > 0);
 });

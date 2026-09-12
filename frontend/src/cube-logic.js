@@ -309,6 +309,63 @@ export function isLocalOrigin(origin) {
 }
 
 /**
+ * The six faces the scanner wants, in order, and how to hold the cube for each.
+ *
+ * The scan reads each image top to bottom as that face's facelet order, so the
+ * row at the top of the picture has to be the row the facelet calls first. The
+ * neighbours below are taken from the move fixtures, not from memory: U's first
+ * row touches B, D's touches F, and the other four touch U.
+ */
+export const SCAN_FACES = [
+  { letter: 'U', colour: 'white', hold: 'white facing the camera, blue edge up' },
+  { letter: 'R', colour: 'red', hold: 'red facing the camera, white edge up' },
+  { letter: 'F', colour: 'green', hold: 'green facing the camera, white edge up' },
+  { letter: 'D', colour: 'yellow', hold: 'yellow facing the camera, green edge up' },
+  { letter: 'L', colour: 'orange', hold: 'orange facing the camera, white edge up' },
+  { letter: 'B', colour: 'blue', hold: 'blue facing the camera, white edge up' },
+];
+
+/**
+ * What to tell someone mid-scan. "3/6 faces captured" left them working out for
+ * themselves which face was next and which way round to hold it, which is the
+ * step that silently produces a cube the solver rejects.
+ */
+export function captureHint(captured) {
+  const next = SCAN_FACES[captured];
+  if (!next) return 'All six faces captured, working out the cube...';
+  const done = captured === 0 ? '' : `${captured} captured, ${SCAN_FACES.length - captured} to go. `;
+  return `${done}Next: ${next.colour.toUpperCase()} centre. Hold the cube ${next.hold}, filling the frame, then press Capture.`;
+}
+
+/**
+ * A camera stream that has not started paints black, and the scanner then
+ * reports stickers it cannot read, which looks like a lighting problem. Catch
+ * the blank frame instead of blaming the light.
+ */
+export function frameIsBlank(pixels) {
+  if (!pixels || pixels.length < 4) return true;
+  let total = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    total += pixels[i] + pixels[i + 1] + pixels[i + 2];
+  }
+  return total / ((pixels.length / 4) * 3) < 8;
+}
+
+/**
+ * Scan failures come back as geometry: "Invalid corner piece", "Face U appears 8
+ * times". Add what to do about it, since the cause is nearly always how the cube
+ * was held.
+ */
+export function describeScanError(message) {
+  const text = (message || '').trim();
+  if (!text) return 'The scan could not be read.';
+  if (/not a solvable cube|Invalid (corner|edge) piece|appears \d+ times/i.test(text)) {
+    return `${text} Check the order, U then R, F, D, L, B, and that each face fills the frame straight on.`;
+  }
+  return text;
+}
+
+/**
  * How a move in the solution list reads against the playback cursor.
  *
  * The cursor is the index of the move to play next, so it is the move the person
