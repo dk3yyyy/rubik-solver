@@ -686,7 +686,8 @@ class App {
 
   /** Turn a failed request into something the user can act on. */
   apiError(err) {
-    return describeApiError(err, API_BASE || null);
+    const origin = typeof window !== 'undefined' ? window.location.origin : null;
+    return describeApiError(err, API_BASE || null, origin);
   }
 
   async play() {

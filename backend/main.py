@@ -20,10 +20,12 @@ import base64
 import binascii
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, List, Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 import solver
@@ -61,6 +63,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Chrome refuses to let a public https page reach a loopback address such as
+# http://localhost:8000 unless the server opts in, which is what stops a
+# statically hosted copy of the frontend from talking to a backend on the
+# visitor's machine. Answer the opt-in preflight when it is asked for. Chrome
+# has used both names for this header over time, so support both.
+_LOCAL_NETWORK_OPT_IN = {
+    "access-control-request-private-network": "Access-Control-Allow-Private-Network",
+    "access-control-request-local-network": "Access-Control-Allow-Local-Network",
+}
+
+
+@app.middleware("http")
+async def allow_local_network_access(request, call_next):
+    response = await call_next(request)
+    for request_header, response_header in _LOCAL_NETWORK_OPT_IN.items():
+        if request.headers.get(request_header, "").strip().lower() == "true":
+            response.headers[response_header] = "true"
+    return response
 
 Facelet = str
 
@@ -309,6 +330,16 @@ async def detect_single_face(file: UploadFile = File(...)) -> DetectResponse:
         facelet="".join(color for color in colors if color is not None),
         confidence=round(confidence, 3),
     )
+
+
+# Serve the built frontend from this same origin when it exists, so
+# `uvicorn main:app` and http://localhost:8000 is the whole app: one process,
+# one URL, no proxy and no cross-origin rules to satisfy. Mounted last so the
+# /api routes declared above keep precedence. Build it with `npm run build`
+# (no VITE_API_URL needed, since the API is same-origin).
+_DIST_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _DIST_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(_DIST_DIR), html=True), name="ui")
 
 
 if __name__ == "__main__":

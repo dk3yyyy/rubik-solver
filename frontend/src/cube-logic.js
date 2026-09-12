@@ -304,19 +304,31 @@ export function faceletFromStickers(stickers) {
   return stickers.map((sticker) => sticker || '?').join('');
 }
 
+export function isLocalOrigin(origin) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin || '');
+}
+
 /**
  * Turn a failed API call into something the user can act on.
  *
- * A TypeError out of fetch means the request never reached a server. On a
- * statically hosted copy of the app that almost always means the Python
- * backend is not running, so say so instead of showing "Failed to fetch".
+ * A TypeError out of fetch means the request never reached a server, which has
+ * two very different causes. A page served from a public origin cannot reach a
+ * loopback backend at all: Chrome gates that behind a permission the app cannot
+ * request, so telling someone to "start the backend" would be wrong. Only when
+ * the page is itself local is the missing backend the likely explanation.
  */
-export function describeApiError(error, where) {
+export function describeApiError(error, where, pageOrigin) {
   const message = (error && error.message) || String(error);
-  if (/failed to fetch|network\s?error|load failed|fetch failed/i.test(message)) {
-    const location = where ? ` at ${where}` : ' on this address';
-    return `Cannot reach the solver backend${location}. `
-      + 'Start it with "uvicorn main:app" inside the backend folder, then try again.';
+  if (!/failed to fetch|network\s?error|load failed|fetch failed/i.test(message)) {
+    return message;
   }
-  return message;
+  if (pageOrigin && !isLocalOrigin(pageOrigin)) {
+    return 'This hosted copy cannot reach the solver backend, because browsers block a public '
+      + 'page from talking to a service running on your machine. Run the app locally instead: '
+      + 'start the backend with "uvicorn main:app" in the backend folder, then open '
+      + 'http://localhost:8000, which serves this page and the API together.';
+  }
+  const location = where ? ` at ${where}` : ' on this address';
+  return `Cannot reach the solver backend${location}. `
+    + 'Start it with "uvicorn main:app" inside the backend folder, then try again.';
 }
