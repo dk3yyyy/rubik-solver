@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
 
 import solver
-from validator import FORMAT, NUM_STICKERS, check_facelet
+from validator import FORMAT, NUM_STICKERS, check_facelet, is_solved
 
 # One image per face, six faces on a cube.
 FACE_COUNT = 6
@@ -194,6 +194,13 @@ async def solve_cube(req: StateRequest) -> SolveResponse:
     solved_state = solver.apply_moves(state, solution)
     if solved_state is None:
         raise HTTPException(status_code=500, detail="Solver produced an unreadable state")
+    if not is_solved(solved_state):
+        # Applying the moves must actually solve the cube; if it does not, the
+        # tables are wrong and reporting the sequence would be a silent lie.
+        raise HTTPException(
+            status_code=500,
+            detail="Solver returned a move sequence that does not solve this cube",
+        )
     return SolveResponse(solution=solution, move_count=len(moves), solved_state=solved_state)
 
 

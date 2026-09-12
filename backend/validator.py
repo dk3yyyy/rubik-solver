@@ -190,3 +190,20 @@ def validate_facelet(facelet: object) -> Tuple[bool, Optional[str]]:
     """Convenience wrapper returning ``(ok, error)``."""
     result = check_facelet(facelet)
     return result.ok, result.error
+
+
+def is_solved(facelet: object) -> bool:
+    """True when every face shows one colour and the faces differ.
+
+    Works for any orientation, since a rotated but solved cube still has nine
+    identical stickers per face. The distinctness check rejects degenerate
+    input such as 54 identical stickers, which is uniform per face but cannot
+    be a cube. Used to confirm the solver's own answer before the API reports
+    it as a solution.
+    """
+    if not isinstance(facelet, str) or len(facelet) != NUM_STICKERS:
+        return False
+    faces = [facelet[i * 9:(i + 1) * 9] for i in range(6)]
+    if any(len(set(face)) != 1 for face in faces):
+        return False
+    return len({face[0] for face in faces}) == 6

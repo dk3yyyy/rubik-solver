@@ -61,6 +61,17 @@ def test_already_solved_cube_needs_no_moves(client):
     assert body["solved_state"] == SOLVED
 
 
+def test_solve_refuses_a_sequence_that_does_not_solve(client, monkeypatch):
+    # A broken table set could hand back a bogus sequence. Reporting it as a
+    # solution would be a silent lie, so solve verifies its own answer.
+    import solver as solver_module
+
+    monkeypatch.setattr(solver_module, "solve_facelet", lambda state, max_depth=22: ["R"])
+    response = client.post("/api/solve", json={"state": scrambled_state(client)})
+    assert response.status_code == 500
+    assert "does not solve" in response.json()["detail"]
+
+
 def test_malformed_state_is_400(client):
     response = client.post("/api/solve", json={"state": "UUU"})
     assert response.status_code == 400

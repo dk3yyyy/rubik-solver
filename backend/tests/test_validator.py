@@ -8,6 +8,7 @@ from validator import (
     check_facelet,
     check_format,
     check_solvable,
+    is_solved,
     validate_facelet,
 )
 
@@ -118,3 +119,16 @@ def test_check_solvable_never_raises_on_bad_input(value):
     result = check_solvable(value)
     assert result.ok is False
     assert result.error
+
+
+def test_is_solved_accepts_any_orientation():
+    assert is_solved(SOLVED) is True
+    relabel = str.maketrans("URFDLB", "RFD" + "LB" + "U")
+    assert is_solved(SOLVED.translate(relabel)) is True
+
+
+def test_is_solved_rejects_anything_else():
+    assert is_solved(SOLVED[:53] + "R") is False
+    assert is_solved("U" * 54) is False
+    assert is_solved("UUU") is False
+    assert is_solved(None) is False
