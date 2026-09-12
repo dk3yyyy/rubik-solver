@@ -26,7 +26,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -478,11 +478,9 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
                 detail=f"Image payload too large (max ~2 MB base64)"
             )
 
-    per_face: List[Tuple[List[Optional[str]], float]] = [
-        detector.detect_face_colors(_decode_base64_image(payload)) for payload in payloads
-    ]
-    face_colors: List[Optional[str]] = [color for colors, _ in per_face for color in colors]
-    scores = [confidence for _, confidence in per_face]
+    per_face = [detector.analyse_face(_decode_base64_image(payload)) for payload in payloads]
+    face_colors: List[Optional[str]] = [color for face in per_face for color in face["colours"]]
+    scores = [face["confidence"] for face in per_face]
 
     unmatched = sum(1 for color in face_colors if color is None)
     detected = len(face_colors) - unmatched
@@ -500,27 +498,41 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
         # Name the faces that failed. Being told to retake all six because one
         # sticker on one face was unreadable is why a scan feels broken.
         failing = []
-        for index, (colors, _) in enumerate(per_face):
-            missing = sum(1 for color in colors if color is None)
+        for index, face in enumerate(per_face):
+            missing = sum(1 for color in face["colours"] if color is None)
             if missing:
-                face = FACE_ORDER[index] if index < len(FACE_ORDER) else f"image {index + 1}"
-                failing.append(f"{face} ({missing} sticker{'' if missing == 1 else 's'})")
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Could not read {unmatched} sticker(s) on face(s) {', '.join(failing)}. "
-                "Retake those faces straight on and evenly lit."
-            ),
+                label = FACE_ORDER[index] if index < len(FACE_ORDER) else f"image {index + 1}"
+                failing.append(f"{label} ({missing} sticker{'' if missing == 1 else 's'})")
+        detail = (
+            f"Could not read {unmatched} sticker(s) on face(s) {', '.join(failing)}. "
+            "Retake those faces straight on and evenly lit."
         )
+        # "Straight on and evenly lit" is the wrong advice for a frame with no
+        # cube face in it: there the fix is to get the whole face in the picture
+        # with the plastic between its stickers visible. The two cases are worth
+        # telling apart, because only one of them is the user's lighting.
+        unframed = [
+            f"frame {index + 1} ({FACE_ORDER[index]})"
+            for index, face in enumerate(per_face)
+            if index < len(FACE_ORDER) and not face["framed"]
+        ]
+        if unframed:
+            detail += (
+                f" No cube face was found in {', '.join(unframed)}: hold one face "
+                "square to the camera, filling most of the frame, with the plastic "
+                "between its stickers visible."
+            )
+        raise HTTPException(status_code=422, detail=detail)
 
     # Every face has a different centre colour and they are captured in the order
     # U, R, F, D, L, B, so an unexpected centre says which frame is wrong. Two
     # frames of the same face, or one washed out enough to read as white, used to
     # surface only as "Face U appears 18 times", which points at no frame at all.
     wrong_centre = []
-    for index, (colors, _) in enumerate(per_face):
+    for index, face in enumerate(per_face):
         if index >= len(FACE_ORDER):
             continue
+        colors = face["colours"]
         center = colors[4] if len(colors) > 4 else None
         if center is not None and center != FACE_ORDER[index]:
             wrong_centre.append((index + 1, FACE_ORDER[index], center))
