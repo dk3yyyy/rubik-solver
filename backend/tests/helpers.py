@@ -71,21 +71,30 @@ def base64_ambiguous_face(cell: int = 60) -> str:
     return base64.b64encode(jpeg_bytes(img)).decode()
 
 
-def make_face_patch(letters: Sequence[str], size: int = 180, gap: int = 5) -> np.ndarray:
+def make_face_patch(letters: Sequence[str], size: int = 180, gap: int = 5,
+                    ring: bool = False) -> np.ndarray:
     """One cube face as it looks on a real cube: stickers, black plastic between.
 
     ``make_face_image`` renders nine flush cells with no gaps, which is fine for
     testing colour classification but nothing like a photographed cube. The gaps
     matter to the scanner: they are how a face is told apart from a patch of
     background that happens to be the same colour.
+
+    ``ring`` puts plastic on all four sides of every sticker, so a sticker is
+    ``cell - 2 * gap`` wide and there is ``2 * gap`` of plastic between two
+    neighbours. The default leaves each sticker flush with the far edge of its
+    cell, which is a builder artifact rather than anything on a cube, and it
+    hides how wide the plastic ring around a single sticker is - the thing that
+    decides whether a crop of one sticker reads as a face.
     """
     img = np.zeros((size, size, 3), dtype=np.uint8)
     cell = size // 3
+    sticker = cell - (2 * gap if ring else gap)
     for index, letter in enumerate(letters):
         row, col = divmod(index, 3)
         top = row * cell + gap
         left = col * cell + gap
-        img[top:top + cell - gap, left:left + cell - gap] = CUBE_BGR[letter]
+        img[top:top + sticker, left:left + sticker] = CUBE_BGR[letter]
     return img
 
 
@@ -102,6 +111,7 @@ def make_frame(
     side: Optional[int] = None,
     brightness: float = 1.0,
     noise: float = 0.0,
+    ring: bool = False,
 ) -> np.ndarray:
     """A camera frame: a desk, optional background quads, and one cube face.
 
@@ -114,7 +124,8 @@ def make_frame(
     which is the worst case for telling a face from a patch of flat colour.
     ``centre`` moves the face off the middle of the frame, (`None`, `None`)
     being the middle. ``brightness`` and ``noise`` are exposure and sensor
-    noise, for frames that are not evenly lit.
+    noise, for frames that are not evenly lit. ``ring`` gives every sticker
+    plastic on all four of its sides (see ``make_face_patch``).
 
     This is the one place frames are built: the adversarial harness in the
     sandbox imports it rather than carrying its own copy, after a second copy
@@ -127,7 +138,7 @@ def make_frame(
         cv2.fillConvexPoly(img, np.array(corners, dtype=np.int32), colour)
 
     size = int(min(height, width) * coverage) if side is None else int(side)
-    patch = make_face_patch(letters, size=180, gap=gap)
+    patch = make_face_patch(letters, size=180, gap=gap, ring=ring)
     centre_x = width / 2 if centre[0] is None else centre[0]
     centre_y = height / 2 if centre[1] is None else centre[1]
     half = size / 2
