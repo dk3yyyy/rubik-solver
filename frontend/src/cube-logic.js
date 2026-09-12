@@ -303,3 +303,20 @@ export function describeInputProblems(stickers) {
 export function faceletFromStickers(stickers) {
   return stickers.map((sticker) => sticker || '?').join('');
 }
+
+/**
+ * Turn a failed API call into something the user can act on.
+ *
+ * A TypeError out of fetch means the request never reached a server. On a
+ * statically hosted copy of the app that almost always means the Python
+ * backend is not running, so say so instead of showing "Failed to fetch".
+ */
+export function describeApiError(error, where) {
+  const message = (error && error.message) || String(error);
+  if (/failed to fetch|network\s?error|load failed|fetch failed/i.test(message)) {
+    const location = where ? ` at ${where}` : ' on this address';
+    return `Cannot reach the solver backend${location}. `
+      + 'Start it with "uvicorn main:app" inside the backend folder, then try again.';
+  }
+  return message;
+}
