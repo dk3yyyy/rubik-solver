@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Rubik's Cube Solver</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800&family=DM+Mono:wght@400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800&family=DM+Mono:wght@400&display=swap" rel="stylesheet" />
+  <script type="module" crossorigin src="./assets/index-DWfUDjab.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-3tGfwFRc.css">
 </head>
 <body>
   <div id="app">
@@ -14,6 +15,10 @@
         <span class="logo-mark" aria-hidden="true"><span>RC</span></span>
         <span class="logo-text">rubik<span class="logo-period">.</span></span>
       </div>
+      <nav class="primary-nav">
+        <a href="#solver">Solver</a>
+        <a href="#how-it-works">How it works</a>
+      </nav>
     </header>
 
     <main>
@@ -47,11 +52,26 @@
             <button id="btn-pause" class="btn btn-small">Pause</button>
             <button id="btn-next" class="btn btn-small">Next</button>
             <button id="btn-prev" class="btn btn-small">Prev</button>
+            <input type="range" id="speed-slider" min="100" max="3000" step="50" value="600" class="speed-slider" aria-label="Playback speed" />
+            <span id="speed-label" class="speed-label">0.60s per move</span>
           </div>
 
           <div class="control-row">
-            <input type="text" id="facelet-input" class="text-input" placeholder="Paste 54-char facelet string..." maxlength="54">
+            <input type="text" id="facelet-input" class="text-input" placeholder="Paste 54-char facelet string..." maxlength="54" />
             <button id="btn-load" class="btn btn-small">Load</button>
+          </div>
+
+          <div class="control-row">
+            <button id="btn-webcam" class="btn btn-ghost">Scan with webcam</button>
+          </div>
+
+          <div id="webcam-panel" class="webcam-panel" hidden>
+            <video id="webcam-video" autoplay playsinline></video>
+            <div class="webcam-buttons">
+              <button id="webcam-capture" class="btn btn-primary">Capture</button>
+              <button id="webcam-close" class="btn btn-ghost">Close</button>
+            </div>
+            <p id="webcam-hint" class="webcam-hint">Point the camera at one face and capture all six, in order U, R, F, D, L, B.</p>
           </div>
 
           <div class="history-panel">
@@ -77,12 +97,42 @@
           <div id="status" class="status"></div>
         </div>
       </section>
+
+      <section id="cube-input" class="cube-input-section content-width">
+        <h2>Enter your cube</h2>
+        <p class="cube-input-hint">
+          Hold the cube with <strong>white on top</strong> and <strong>green facing you</strong>.
+          Pick a colour below, then tap the stickers that match it. The centre stickers are fixed
+          because they define which colour is on which side.
+        </p>
+        <div class="cube-input-body">
+          <div id="cube-net" class="cube-net"></div>
+          <div class="cube-input-side">
+            <div id="cube-palette" class="palette"></div>
+            <div id="cube-input-status" class="input-status">48 stickers left to fill</div>
+            <div class="input-actions">
+              <button id="btn-input-solve" class="btn btn-dark">Predict moves</button>
+              <button id="btn-input-clear" class="btn btn-ghost">Clear</button>
+            </div>
+            <div id="move-prediction" class="move-prediction" hidden></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="how-it-works" class="how-section content-width">
+        <h2>How it works</h2>
+        <p>This solver uses Herbert Kociemba's two-phase algorithm to find solutions in 20 moves or fewer. The cube state is represented as a 54-character facelet string — nine stickers per face, ordered U, R, F, D, L, B.</p>
+        <p>Type moves directly (U, U', D, D', L, L', R, R', F, F', B, B') or use the controls above. The 3D cube responds to mouse drag for camera rotation.</p>
+      </section>
     </main>
+
+    <footer class="site-footer content-width">
+      <span class="logo-text small">rubik<span class="logo-period">.</span></span>
+      <span class="copyright">&copy; 2026</span>
+    </footer>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cubejs@1.3.2/lib/cube.min.js"></script>
-  <script src="app.js"></script>
 </body>
 </html>
