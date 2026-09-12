@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from helpers import base64_face, solved_faces
+import main
 from main import app
 from validator import validate_facelet
 
@@ -273,3 +274,54 @@ def test_api_routes_keep_precedence_when_the_ui_is_mounted(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+
+
+def test_a_burst_of_edits_is_not_throttled(client):
+    """Guard the limiter's default against the app's own traffic.
+
+    Completing a cube, and correcting a scanned one, each trigger a solve every
+    time the cube becomes complete, so a dozen calls in a row is ordinary use. At
+    the ten-per-minute default this failed, and so did most of this file.
+    """
+    for _ in range(12):
+        response = client.post("/api/validate", json={"state": SOLVED})
+        assert response.status_code == 200, response.text
+
+
+def test_the_limiter_still_blocks_past_its_limit(client, monkeypatch):
+    monkeypatch.setattr(main, "RATE_LIMIT_MAX", 3)
+
+    for _ in range(3):
+        assert client.post("/api/validate", json={"state": SOLVED}).status_code == 200
+
+    response = client.post("/api/validate", json={"state": SOLVED})
+    assert response.status_code == 429
+    assert response.json()["detail"].startswith("Rate limit exceeded")
+    # Without this a client has no idea when to come back.
+    assert int(response.headers["Retry-After"]) >= 1
+
+
+def test_the_health_check_is_never_throttled(client, monkeypatch):
+    # A throttled health check reads as a dead service to the platform, which
+    # then replaces the deploy.
+    monkeypatch.setattr(main, "RATE_LIMIT_MAX", 1)
+
+    for _ in range(5):
+        assert client.get("/api/health").status_code == 200
+
+
+def test_the_limiter_can_be_switched_off(client, monkeypatch):
+    monkeypatch.setattr(main, "RATE_LIMIT_MAX", 0)
+
+    for _ in range(15):
+        assert client.post("/api/validate", json={"state": SOLVED}).status_code == 200
+
+
+def test_allowed_origins_splits_a_comma_separated_list(monkeypatch):
+    # One raw value in the list makes "a,b" a single origin that matches nothing.
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://a.example, https://b.example")
+    assert main._allowed_origins() == ["https://a.example", "https://b.example"]
+
+    monkeypatch.setenv("ALLOWED_ORIGINS", "")
+    assert main._allowed_origins() == ["*"]
+
