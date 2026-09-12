@@ -32,6 +32,11 @@ jobs:
           cache-dependency-path: backend/requirements*.txt
       - name: Install dependencies
         run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      # The UI mount at "/" only exists when frontend/dist does, and one API test
+      # covers that mount. Stubbing it here keeps that test from skipping; the
+      # frontend job builds the real one.
+      - name: Stub the built frontend so the UI-mount test runs
+        run: mkdir -p frontend/dist && printf '<!doctype html><title>stub</title>\n' > frontend/dist/index.html
       - name: Run tests
         working-directory: backend
         run: python -m pytest tests -q
