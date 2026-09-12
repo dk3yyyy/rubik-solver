@@ -32,10 +32,12 @@ This project is an interactive Rubik's cube solver web application. Users can sc
 
 ### Features
 
+- **Guided cube entry** — tap a colour, then tap the stickers on a six-face net to type in a scrambled physical cube
+- **Move prediction** — the moment the cube is filled in, the app reports how many moves the solution takes
+- **Learner-friendly playback** — a speed slider from 0.1s to 3s per move, plus Next and Prev for stepping one move at a time
 - **3D Interactive Cube** — drag to rotate, click to twist faces (Three.js)
 - **Random Scramble** — generates legal, random cube states
 - **Two-Phase Solver** — solves any valid cube state in ≤ 22 moves
-- **Step-by-Step Playback** — animate the solution one move at a time
 - **Webcam Cube Scanning** — detect a physical cube via camera and import its state
 - **Responsive UI** — works on desktop and mobile browsers
 
@@ -141,7 +143,8 @@ rubik-solver/
 │   ├── index.html
 │   ├── src/
 │   │   ├── main.js              # App, Three.js renderer, UI wiring
-│   │   ├── cube-logic.js        # Move notation, facelet grid, optimiser
+│   │   ├── cube-logic.js        # Move notation, facelet grid, palette, optimiser
+│   │   ├── cube-input.js        # Guided sticker-by-sticker entry panel
 │   │   └── styles.css
 │   └── test/
 │       ├── cube-logic.test.js
@@ -328,22 +331,35 @@ Returns `422` when a sticker cannot be classified or the detected state is not s
 
 ## Using the App
 
-1. **Open the app** — navigate to `http://localhost:5173` in your browser.
-2. **Scramble** — click the **Scramble** button to generate a random cube state. The 3D cube updates instantly.
-3. **Solve** — click **Solve** to run the solver. The solution appears in the move list.
-4. **Step through** — use the **◀** and **▶** buttons to advance through the solution one move at a time. Each step animates the 3D cube.
-5. **Reset** — click **Reset** to return the cube to the solved state.
-6. **Webcam scan** — click **Scan Cube**, grant camera permission, point the camera at each face of your physical cube as prompted, and the app imports the state automatically.
+The usual flow is to type in the cube you are holding, then follow the solution on screen.
+
+1. **Open the app** at `http://localhost:5173` with the backend running.
+2. **Enter your cube** — in the **Enter your cube** section, hold the physical cube white on top and
+   green facing you. Pick a colour, then tap the stickers that match it on the six-face net. The
+   centre stickers are fixed because they define the colours. The 3D cube above updates as you go.
+3. **Read the prediction** — once all 54 stickers are set the app solves the cube automatically and
+   reports the number of moves, for example `21 moves`.
+4. **Follow along** — set the speed slider to something you can keep up with, then press **Play** to
+   watch the solution run in real time. Press **Pause** at any point and **Play** again to carry on.
+5. **Or step through manually** — **Next** applies a single move, **Prev** takes it back, so you can
+   match each move on the real cube before moving on.
+6. **Fix mistakes** — if you tapped a sticker wrong, pick the colour again and re-tap it, or use the
+   **clear** swatch to empty it. The prediction updates when the cube is complete again.
+
+Random practice is available too: **Scramble** generates a legal random state, and **Solve** finds
+its solution. You can also paste a 54-character facelet string, or use **Scan with webcam** to read
+a face at a time; a scan is loaded into the net so you can correct any sticker it got wrong.
 
 ### Keyboard shortcuts
 
-| Key        | Action              |
-|------------|---------------------|
-| `S`        | Scramble            |
-| `Enter`    | Solve               |
-| `→`        | Next step           |
-| `←`        | Previous step       |
-| `R`        | Reset to solved     |
+| Key        | Action                                   |
+|------------|------------------------------------------|
+| `S`        | Scramble                                 |
+| `Enter`    | Solve the current cube                   |
+| `→`        | Next step                                |
+| `←`        | Previous step                            |
+| `U D L R F B` | Turn that face clockwise              |
+| `u d l r f b` | Turn that face anticlockwise           |
 
 ---
 

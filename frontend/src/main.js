@@ -3,20 +3,24 @@
 import {
   FACES,
   FACE_CELLS,
+  FACE_COLOURS,
   FACE_NORMALS,
   STICKER_PLACEMENTS,
   invertMove,
   moveToRotation,
   optimizeMoves,
 } from './cube-logic.js';
+import { CubeInput } from './cube-input.js';
 
-const COLORS = {
-  U: 0xffffff, D: 0xffd500, F: 0x009b48,
-  B: 0x0046ad, L: 0xff5900, R: 0xb71234, interior: 0x1a1a1a
-};
+// Three.js wants integer colours; the picker and the cube share one palette.
+const COLORS = Object.fromEntries(
+  Object.entries(FACE_COLOURS).map(([face, { hex }]) => [face, parseInt(hex.slice(1), 16)]),
+);
+COLORS.interior = 0x1a1a1a;
 
 const SOLVED_FACELET = 'UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB';
 const FACE_COUNT = 6;
+const STICKER_TOTAL = 54;
 
 // Requests go to the same origin by default, which the Vite dev server proxies
 // to the backend (see vite.config.js). Set VITE_API_URL to point elsewhere,
@@ -387,6 +391,13 @@ class App {
     this.webcamHint = document.getElementById('webcam-hint');
     this.faceletInput = document.getElementById('facelet-input');
     this.speedSlider = document.getElementById('speed-slider');
+    this.speedLabelEl = document.getElementById('speed-label');
+    this.inputStatusEl = document.getElementById('cube-input-status');
+    this.predictionEl = document.getElementById('move-prediction');
+    this.cubeInput = null;
+    this.predictionTimer = null;
+    this.lastMirrored = null;
+    this.solvedInputFacelet = null;
 
     this.init();
   }
@@ -395,9 +406,16 @@ class App {
     const container = document.getElementById('cube-canvas');
     this.cube = new Cube3D(container);
     this.cube.setMoveDuration(Number(this.speedSlider.value));
+    this.cubeInput = new CubeInput(
+      document.getElementById('cube-net'),
+      document.getElementById('cube-palette'),
+      { onChange: (state, meta) => this.onInputChange(state, meta) },
+    );
     this.bindEvents();
+    this.updateSpeedLabel();
     this.updateBestTimesDisplay();
-    this.setStatus('Ready. Click "Scramble" to start.', 'info');
+    this.updateInputStatus(this.cubeInput.getState());
+    this.setStatus('Fill in your cube below, or press Scramble to try a random one.', 'info');
   }
 
   bindEvents() {
@@ -417,14 +435,38 @@ class App {
     document.getElementById('btn-optimize').addEventListener('click', () => this.optimizeSolution());
     document.getElementById('btn-clear-history').addEventListener('click', () => this.clearHistory());
     document.getElementById('btn-clear-times').addEventListener('click', () => this.clearBestTimes());
+    document.getElementById('btn-input-solve').addEventListener('click', () => this.solve());
+    document.getElementById('btn-input-clear').addEventListener('click', () => this.clearInput());
 
     this.faceletInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') this.loadFacelet();
     });
 
     document.addEventListener('keydown', (e) => {
+      if (document.activeElement.tagName === 'INPUT') return;
+      // Arrow keys step through the solution one move at a time.
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        this.next();
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        this.prev();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.solve();
+        return;
+      }
+      if (e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        this.scramble();
+        return;
+      }
       const map = { 'u': "U'", 'U': 'U', 'd': "D'", 'D': 'D', 'l': "L'", 'L': 'L', 'r': "R'", 'R': 'R', 'f': "F'", 'F': 'F', 'b': "B'", 'B': 'B' };
-      if (map[e.key] && document.activeElement.tagName !== 'INPUT') {
+      if (map[e.key]) {
         e.preventDefault();
         this.cube.enqueue(map[e.key], true);
         this.history.addMove(map[e.key]);
@@ -434,6 +476,7 @@ class App {
 
     this.speedSlider.addEventListener('input', (e) => {
       this.cube.setMoveDuration(Number(e.target.value));
+      this.updateSpeedLabel();
     });
   }
 
@@ -460,7 +503,8 @@ class App {
       await this.cube.playSolution(this.scrambleMoves);
       this.currentFacelet = data.state;
       this.cube.updateStickers(data.state);
-      this.faceletInput.value = data.state;
+      this.solvedInputFacelet = null;
+      this.cubeInput.setFacelet(data.state);
 
       this.timer.stop();
       this.stopTimerDisplay();
@@ -472,11 +516,20 @@ class App {
   }
 
   async solve() {
-    let facelet = this.faceletInput.value.trim().toUpperCase();
+    const state = this.cubeInput ? this.cubeInput.getState() : null;
 
-    if (!facelet || facelet.length !== 54) {
-      if (this.currentFacelet) facelet = this.currentFacelet;
-      else { this.setStatus('Enter a 54-character facelet string first', 'error'); return; }
+    if (state && !state.complete) {
+      this.setStatus(`Your cube is not finished: ${state.problems}.`, 'error');
+      return;
+    }
+
+    const facelet = (state && state.complete)
+      ? state.facelet
+      : (this.faceletInput.value.trim().toUpperCase() || this.currentFacelet);
+
+    if (!facelet || facelet.length !== STICKER_TOTAL) {
+      this.setStatus('Fill in all 54 stickers, or paste a facelet string', 'error');
+      return;
     }
 
     this.setStatus('Solving...', 'loading');
@@ -492,21 +545,148 @@ class App {
       this.solution = data.solution.split(' ').filter(Boolean);
       this.solvedState = data.solved_state;
       this.currentMoveIndex = 0;
+      this.isPlaying = false;
+      this.solvedInputFacelet = facelet;
       this.history.setSolution(this.solution);
       this.updateHistoryDisplay();
 
-      this.moveCounterEl.textContent = `${data.move_count} moves`;
+      this.showPrediction(data.move_count, this.solution.length === 0);
+      this.moveCounterEl.textContent = this.solution.length
+        ? `0/${this.solution.length} moves`
+        : '0 moves';
       this.setStatus(
-        this.solution.length ? `Solution (${data.move_count} moves): ${data.solution}` : 'Cube is already solved',
-        'success'
+        this.solution.length
+          ? `Your cube needs ${data.move_count} moves. `
+            + 'Set the speed, then press Play to follow along, or use Next to step through.'
+          : 'That cube is already solved, so no moves are needed.',
+        'success',
       );
     } catch (err) {
+      this.clearPrediction();
       this.setStatus('Error: ' + err.message, 'error');
     }
   }
 
+  /** Show the predicted move count for the cube the user entered. */
+  showPrediction(count, alreadySolved) {
+    if (!this.predictionEl) return;
+    this.predictionEl.hidden = false;
+    this.predictionEl.textContent = '';
+
+    if (alreadySolved) {
+      this.predictionEl.appendChild(
+        document.createTextNode('Already solved, so there is nothing to do.'),
+      );
+      return;
+    }
+
+    const headline = document.createElement('span');
+    headline.className = 'prediction-count';
+    headline.textContent = `${count} ${count === 1 ? 'move' : 'moves'}`;
+    this.predictionEl.appendChild(headline);
+    this.predictionEl.appendChild(
+      document.createTextNode('Set the speed, then press Play to follow along, or tap Next to step through one move at a time.'),
+    );
+  }
+
+  clearPrediction() {
+    if (!this.predictionEl) return;
+    this.predictionEl.hidden = true;
+    this.predictionEl.textContent = '';
+  }
+
+  /** React to a sticker being painted or cleared. */
+  onInputChange(state, meta = {}) {
+    if (meta.lockedCentre) {
+      this.setStatus(
+        `The ${FACE_COLOURS[meta.lockedCentre].name} centre is fixed. `
+        + 'Hold the cube with white on top and green facing you so the centres line up.',
+        'info',
+      );
+    }
+
+    // Any edit invalidates a solution that was computed for the previous entry.
+    if (this.solvedInputFacelet && state.facelet !== this.solvedInputFacelet) {
+      this.solution = [];
+      this.solvedState = null;
+      this.solvedInputFacelet = null;
+      this.currentMoveIndex = 0;
+      this.history.setSolution([]);
+      this.updateHistoryDisplay();
+      this.moveCounterEl.textContent = '0 moves';
+      this.clearPrediction();
+    }
+
+    if (!this.isPlaying) {
+      const painted = state.stickers.filter(Boolean).length;
+      // With nothing entered yet, rest on the solved cube rather than a dark one.
+      this.cube.updateStickers(painted <= FACE_COUNT ? SOLVED_FACELET : state.facelet);
+    }
+
+    this.updateInputStatus(state);
+    this.syncFaceletInput(state);
+
+    if (state.complete) this.schedulePrediction();
+    else this.clearPrediction();
+  }
+
+  /** Keep the paste field in step with the picker without clobbering typing. */
+  syncFaceletInput(state) {
+    if (state.complete) {
+      this.faceletInput.value = state.facelet;
+      this.lastMirrored = state.facelet;
+      return;
+    }
+    if (this.lastMirrored && this.faceletInput.value === this.lastMirrored) {
+      this.faceletInput.value = '';
+      this.lastMirrored = null;
+    }
+  }
+
+  updateInputStatus(state) {
+    if (!this.inputStatusEl) return;
+    if (state.complete) {
+      this.inputStatusEl.textContent = 'All 54 stickers set. Working out the shortest solution...';
+      this.inputStatusEl.classList.add('is-ready');
+    } else {
+      this.inputStatusEl.textContent = state.problems;
+      this.inputStatusEl.classList.remove('is-ready');
+    }
+  }
+
+  /** Wait a moment so a burst of taps does not fire a request each. */
+  schedulePrediction() {
+    clearTimeout(this.predictionTimer);
+    this.predictionTimer = setTimeout(() => this.solve(), 250);
+  }
+
+  clearInput() {
+    clearTimeout(this.predictionTimer);
+    this.solution = [];
+    this.solvedState = null;
+    this.solvedInputFacelet = null;
+    this.currentMoveIndex = 0;
+    this.isPlaying = false;
+    this.lastMirrored = null;
+    this.faceletInput.value = '';
+    this.history.clear();
+    this.updateHistoryDisplay();
+    this.clearPrediction();
+    this.moveCounterEl.textContent = '0 moves';
+    this.cubeInput.clear();
+    this.setStatus('Cleared. Enter your cube again.', 'info');
+  }
+
+  updateSpeedLabel() {
+    if (!this.speedLabelEl) return;
+    const ms = Number(this.speedSlider.value);
+    this.speedLabelEl.textContent = `${(ms / 1000).toFixed(2)}s per move`;
+  }
+
   async play() {
     if (this.isPlaying || this.currentMoveIndex >= this.solution.length) return;
+    // A queued prediction would otherwise reset the solution mid-playback.
+    clearTimeout(this.predictionTimer);
     this.isPlaying = true;
     this.timer.start();
     this.startTimerDisplay();
@@ -575,22 +755,29 @@ class App {
     this.solution = [];
     this.scrambleMoves = [];
     this.solvedState = null;
+    this.solvedInputFacelet = null;
     this.currentFacelet = SOLVED_FACELET;
     this.currentMoveIndex = 0;
     this.isPlaying = false;
+    this.lastMirrored = null;
     this.faceletInput.value = '';
     this.timer.reset();
     this.stopTimerDisplay();
     this.history.clear();
     this.updateHistoryDisplay();
+    this.clearPrediction();
     this.moveCounterEl.textContent = '0 moves';
+    if (this.cubeInput) this.cubeInput.clear();
     this.setStatus('Reset to solved state', 'info');
   }
 
   async loadFacelet() {
     const facelet = this.faceletInput.value.trim().toUpperCase();
 
-    if (facelet.length !== 54) { this.setStatus('Facelet must be 54 characters', 'error'); return; }
+    if (facelet.length !== STICKER_TOTAL) {
+      this.setStatus(`Facelet must be ${STICKER_TOTAL} characters`, 'error');
+      return;
+    }
 
     this.setStatus('Validating...', 'loading');
     try {
@@ -606,7 +793,9 @@ class App {
       this.cube.updateStickers(facelet);
       this.currentFacelet = facelet;
       this.solvedState = null;
-      this.setStatus('Cube loaded!', 'success');
+      this.solvedInputFacelet = null;
+      this.cubeInput.setFacelet(facelet);
+      this.setStatus('Cube loaded. Press Solve to predict the moves.', 'success');
     } catch (err) {
       this.setStatus('Error: ' + err.message, 'error');
     }
@@ -667,9 +856,14 @@ class App {
       this.cube.updateStickers(data.state);
       this.currentFacelet = data.state;
       this.solvedState = null;
-      this.faceletInput.value = data.state;
+      this.solvedInputFacelet = null;
+      this.cubeInput.setFacelet(data.state);
       this.moveCounterEl.textContent = 'Scanned cube';
-      this.setStatus(`Scanned cube (confidence ${Math.round(data.confidence * 100)}%)`, 'success');
+      this.setStatus(
+        `Scanned cube (confidence ${Math.round(data.confidence * 100)}%). `
+        + 'Check the grid below and fix any wrong stickers before solving.',
+        'success',
+      );
       this.capturedFaces = [];
       this.closeWebcam();
     } catch (err) {

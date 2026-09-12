@@ -233,3 +233,73 @@ export function optimizeMoves(moves) {
   }
   return result.map(({ face, turns }) => formatMove(face, turns));
 }
+
+/**
+ * The six sticker colours, in the standard Western scheme: white up, green
+ * front, red right, blue back, orange left, yellow down. Single source of
+ * truth for the 3D materials and the on-screen picker.
+ */
+export const FACE_COLOURS = {
+  U: { letter: 'U', name: 'white', hex: '#ffffff' },
+  R: { letter: 'R', name: 'red', hex: '#b71234' },
+  F: { letter: 'F', name: 'green', hex: '#009b48' },
+  D: { letter: 'D', name: 'yellow', hex: '#ffd500' },
+  L: { letter: 'L', name: 'orange', hex: '#ff5900' },
+  B: { letter: 'B', name: 'blue', hex: '#0046ad' },
+};
+
+export const STICKER_COUNT = 54;
+export const STICKERS_PER_FACE = 9;
+
+/** How a face is labelled in the picker, and where its centre is. */
+export const FACE_ORDER = ['U', 'R', 'F', 'D', 'L', 'B'];
+
+/**
+ * Net layout for the picker: the six faces arranged the way a cube unfolds,
+ * so the user can read a physical cube off it.
+ *
+ *     .  U  .  .
+ *     L  F  R  B
+ *     .  D  .  .
+ */
+export const FACE_NET = [
+  { face: 'U', row: 1, column: 2 },
+  { face: 'L', row: 2, column: 1 },
+  { face: 'F', row: 2, column: 2 },
+  { face: 'R', row: 2, column: 3 },
+  { face: 'B', row: 2, column: 4 },
+  { face: 'D', row: 3, column: 2 },
+];
+
+/** Count how many stickers of each colour the input holds. */
+export function countColours(stickers) {
+  const counts = { U: 0, R: 0, F: 0, D: 0, L: 0, B: 0 };
+  for (const sticker of stickers) {
+    if (sticker && sticker in counts) counts[sticker] += 1;
+  }
+  return counts;
+}
+
+/**
+ * Describe what still needs fixing in a partly filled cube, or null when the
+ * input has nine stickers of each colour and can be sent to the solver.
+ */
+export function describeInputProblems(stickers) {
+  if (stickers.length !== STICKER_COUNT) {
+    return `Expected ${STICKER_COUNT} stickers, got ${stickers.length}`;
+  }
+  const missing = stickers.filter((sticker) => !sticker).length;
+  if (missing) {
+    return `${missing} sticker${missing === 1 ? '' : 's'} left to fill`;
+  }
+  const counts = countColours(stickers);
+  const wrong = Object.entries(counts).filter(([, count]) => count !== STICKERS_PER_FACE);
+  if (wrong.length) {
+    return wrong.map(([letter, count]) => `${FACE_COLOURS[letter].name} ${count}/9`).join(', ');
+  }
+  return null;
+}
+
+export function faceletFromStickers(stickers) {
+  return stickers.map((sticker) => sticker || '?').join('');
+}
