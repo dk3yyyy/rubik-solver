@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A scanned frame is read from the cube in front of the camera. The sampler took
+  the bounding box of the largest four-sided contour and, finding none, fell back
+  to the whole picture, so on a real frame the nine "stickers" were patches of
+  wall, desk and shirt. A frame that holds no readable cube face is now reported
+  as such, instead of being turned into nine stickers and blamed on the centre
+  colour.
+- A cube that is not held dead square is read correctly. The grid is fitted to a
+  face-sized quadrilateral when one is found, and otherwise searched over a few
+  sizes and small rotations of the middle of the frame, so a cube filling the
+  picture at an angle no longer has its edge stickers sampled from the
+  background.
+
 ### Added
+- `backend/tools/scan_frame_diag.py` — read saved camera frames through the same
+  code the endpoint runs, print the nine stickers it makes of each one and why,
+  and write a marked-up crop showing where it sampled.
 - `Dockerfile` — multi-stage build that compiles the frontend and produces a
   single Python image serving both the API and the built UI.
 - `docker-compose.yml` — one-command self-hosted deployment of the full stack

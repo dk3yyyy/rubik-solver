@@ -1,11 +1,14 @@
 """API contract tests for the FastAPI app."""
 
+import base64
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from helpers import base64_ambiguous_face, base64_face, solved_faces
+from helpers import base64_ambiguous_face, base64_face, base64_frame, solved_faces
 import main
 from main import app
 from validator import validate_facelet
@@ -215,6 +218,42 @@ def test_webcam_scan_reads_a_complete_solved_cube(client):
 def test_webcam_scan_rejects_bad_base64(client):
     response = client.post("/api/webcam-scan", json={"images": ["!!not base64!!"]})
     assert response.status_code == 400
+
+
+def test_the_scan_says_when_no_cube_face_was_in_the_frame(client):
+    # A frame of nothing but desk, the way a scan goes when the cube is out of
+    # shot. It has to say so, rather than turn nine patches of desk into a cube
+    # and blame the user's centre sticker for the result.
+    plain = np.full((480, 640, 3), 70, dtype=np.uint8)
+    ok, buffer = cv2.imencode(".jpg", plain)
+    assert ok
+    desk = base64.b64encode(buffer.tobytes()).decode()
+
+    response = client.post("/api/webcam-scan", json={"images": [desk] * 6})
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "No cube face was found in frame 1 (U)" in detail, detail
+    assert "frame 6 (B)" in detail, detail
+    assert "Retake those faces straight on and evenly lit." in detail, detail
+
+
+def test_a_scan_of_a_cube_as_a_camera_sees_it_reads_every_sticker(client):
+    # Frames the way the scanner actually receives them: a cube filling most of
+    # the picture, held at a slight angle, with a table behind it.
+    faces = [
+        base64_frame(
+            letter * 9,
+            coverage=0.6,
+            angle=12,
+            quads=[([(0, 320), (640, 320), (640, 480), (0, 480)], (40, 90, 40))],
+        )
+        for letter in "URFDLB"
+    ]
+    response = client.post("/api/webcam-scan", json={"images": faces})
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert body["state"] == "U" * 9 + "R" * 9 + "F" * 9 + "D" * 9 + "L" * 9 + "B" * 9
+    assert body["confidence"] == 1.0
 
 
 def test_health_reports_the_service_and_the_solver(client):
