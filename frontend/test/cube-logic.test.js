@@ -18,6 +18,7 @@ import {
   FACE_ORDER,
   STICKER_COUNT,
   STICKER_PLACEMENTS,
+  BackendUnreachable,
   applyMoveToFacelet,
   applyMovesToFacelet,
   countColours,
@@ -33,6 +34,7 @@ import {
   normalFromEuler,
   optimizeMoves,
   parseMove,
+  readApiResponse,
   rotateVector,
 } from '../src/cube-logic.js';
 
@@ -262,4 +264,46 @@ test('solver errors are passed through unchanged', () => {
   const original = new Error('No solution found within 22 moves');
   assert.equal(describeApiError(original, 'http://localhost:8000', 'http://localhost:5173'), original.message);
   assert.equal(describeApiError('something odd'), 'something odd');
+});
+
+test('a good API reply is parsed', async () => {
+  const response = new Response(JSON.stringify({ solution: "R U R'" }), { status: 200 });
+  assert.deepEqual(await readApiResponse(response), { solution: "R U R'" });
+});
+
+test('a JSON error from our API keeps its own message', async () => {
+  const response = new Response(JSON.stringify({ detail: 'Unsolvable cube state' }), {
+    status: 422,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  await assert.rejects(() => readApiResponse(response), /Unsolvable cube state/);
+});
+
+test('a static host answering 404 with HTML counts as unreachable', async () => {
+  // This is what /api/solve returns on the GitHub Pages copy, and reading it as
+  // JSON is what used to surface a parse error to the user.
+  const response = new Response('<!DOCTYPE html><title>404</title>', { status: 404 });
+  await assert.rejects(() => readApiResponse(response), BackendUnreachable);
+});
+
+test('an empty reply counts as unreachable rather than crashing', async () => {
+  await assert.rejects(() => readApiResponse(new Response('', { status: 200 })), BackendUnreachable);
+});
+
+test('that failure is reported as the hosted-copy problem, not a parse error', async () => {
+  const error = await readApiResponse(new Response('<html>404</html>', { status: 404 }))
+    .catch((thrown) => thrown);
+  const message = describeApiError(error, null, 'https://dk3yyyy.github.io');
+  assert.ok(message.includes('hosted copy cannot reach'), message);
+  assert.ok(!message.toLowerCase().includes('json'), message);
+});
+
+test('a 500 from our own API is not mistaken for an unreachable backend', async () => {
+  const response = new Response(JSON.stringify({ detail: 'Solver failed' }), {
+    status: 500,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const error = await readApiResponse(response).catch((thrown) => thrown);
+  assert.ok(!(error instanceof BackendUnreachable), error.name);
+  assert.equal(describeApiError(error, null, 'http://localhost:8000'), 'Solver failed');
 });

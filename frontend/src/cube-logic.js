@@ -309,6 +309,49 @@ export function isLocalOrigin(origin) {
 }
 
 /**
+ * The request never reached our API.
+ *
+ * Distinct from a normal HTTP failure: a static host answers /api/... with its
+ * own 404 page, or the connection is refused outright, and neither produces a
+ * message worth showing a user.
+ */
+export class BackendUnreachable extends Error {
+  constructor(message = 'Failed to fetch') {
+    super(message);
+    this.name = 'BackendUnreachable';
+  }
+}
+
+/**
+ * Read an API reply, turning anything that is not our API's JSON into a
+ * BackendUnreachable.
+ *
+ * `response.json()` cannot be called before checking `response.ok`: when the
+ * frontend is served by a static host, `/api/solve` comes back as that host's
+ * HTML 404 and the parse error is what the user ends up seeing.
+ */
+export async function readApiResponse(response) {
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+  if (data === null) {
+    // Not JSON, so this was not our API answering, however the status reads.
+    throw new BackendUnreachable();
+  }
+  if (!response.ok) {
+    const detail = typeof data.detail === 'string' ? data.detail : null;
+    throw new Error(detail || `Server returned ${response.status}`);
+  }
+  return data;
+}
+
+/**
  * Turn a failed API call into something the user can act on.
  *
  * A TypeError out of fetch means the request never reached a server, which has
@@ -319,7 +362,9 @@ export function isLocalOrigin(origin) {
  */
 export function describeApiError(error, where, pageOrigin) {
   const message = (error && error.message) || String(error);
-  if (!/failed to fetch|network\s?error|load failed|fetch failed/i.test(message)) {
+  const unreachable = error instanceof BackendUnreachable
+    || /failed to fetch|network\s?error|load failed|fetch failed/i.test(message);
+  if (!unreachable) {
     return message;
   }
   if (pageOrigin && !isLocalOrigin(pageOrigin)) {

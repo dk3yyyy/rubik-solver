@@ -10,6 +10,7 @@ import {
   invertMove,
   moveToRotation,
   optimizeMoves,
+  readApiResponse,
 } from './cube-logic.js';
 import { CubeInput } from './cube-input.js';
 
@@ -484,9 +485,7 @@ class App {
   async scramble() {
     this.setStatus('Generating scramble...', 'loading');
     try {
-      const res = await fetch(api('/scramble'));
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const data = await res.json();
+      const data = await readApiResponse(await fetch(api('/scramble')));
 
       this.cube.reset();
       this.scrambleMoves = data.scramble.split(' ').filter(Boolean);
@@ -535,13 +534,11 @@ class App {
 
     this.setStatus('Solving...', 'loading');
     try {
-      const res = await fetch(api('/solve'), {
+      const data = await readApiResponse(await fetch(api('/solve'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ state: facelet })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+      }));
 
       this.solution = data.solution.split(' ').filter(Boolean);
       this.solvedState = data.solved_state;
@@ -788,12 +785,11 @@ class App {
 
     this.setStatus('Validating...', 'loading');
     try {
-      const res = await fetch(api('/validate'), {
+      const data = await readApiResponse(await fetch(api('/validate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ state: facelet })
-      });
-      const data = await res.json();
+      }));
       if (!data.valid) { this.setStatus('Invalid: ' + data.error, 'error'); return; }
 
       this.cube.reset();
@@ -851,13 +847,11 @@ class App {
   async scanCapturedFaces() {
     this.setStatus('Scanning cube...', 'loading');
     try {
-      const res = await fetch(api('/webcam-scan'), {
+      const data = await readApiResponse(await fetch(api('/webcam-scan'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ images: this.capturedFaces })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+      }));
 
       this.cube.reset();
       this.cube.updateStickers(data.state);
