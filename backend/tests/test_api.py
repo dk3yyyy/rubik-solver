@@ -130,6 +130,21 @@ def test_webcam_scan_needs_all_six_faces(client):
     assert "54" in response.json()["detail"]
 
 
+def test_webcam_scan_partial_scan_message_names_the_counts(client):
+    response = client.post("/api/webcam-scan", json={"images": [base64_face("U" * 9)] * 3})
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "27 stickers" in detail
+    assert "6 faces" in detail
+
+
+def test_webcam_scan_rejects_more_than_six_faces(client):
+    # Regression: a seventh image used to produce "need -1 more face(s)".
+    response = client.post("/api/webcam-scan", json={"images": [base64_face("U" * 9)] * 7})
+    assert response.status_code == 400
+    assert "At most 6" in response.json()["detail"]
+
+
 def test_webcam_scan_accepts_a_single_image_field(client):
     response = client.post("/api/webcam-scan", json={"image": base64_face("U" * 9)})
     assert response.status_code == 422

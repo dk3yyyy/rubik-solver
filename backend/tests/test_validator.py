@@ -109,3 +109,12 @@ def test_non_string_input():
     result = check_format(None)
     assert result.ok is False
     assert result.kind == FORMAT
+
+
+@pytest.mark.parametrize("value", ["ABC", "", None, 123, "X" * 54])
+def test_check_solvable_never_raises_on_bad_input(value):
+    # Regression: calling the solvability check directly used to raise
+    # IndexError for short input and AttributeError for non-strings.
+    result = check_solvable(value)
+    assert result.ok is False
+    assert result.error

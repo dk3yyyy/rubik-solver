@@ -27,7 +27,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
 
 import solver
-from validator import FORMAT, check_facelet
+from validator import FORMAT, NUM_STICKERS, check_facelet
+
+# One image per face, six faces on a cube.
+FACE_COUNT = 6
 
 try:
     import webcam
@@ -245,6 +248,11 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
     payloads = req.images if req.images else ([req.image] if req.image else [])
     if not payloads:
         raise HTTPException(status_code=400, detail="Provide 'image' or 'images'")
+    if len(payloads) > FACE_COUNT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"At most {FACE_COUNT} face images are accepted (got {len(payloads)})",
+        )
 
     face_colors: List[Optional[str]] = []
     scores: List[float] = []
@@ -257,11 +265,13 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
     detected = len(face_colors) - unmatched
     confidence = (sum(scores) / len(scores)) * (detected / len(face_colors))
 
-    if len(face_colors) != 54:
-        need = 6 - len(payloads)
+    if len(face_colors) != NUM_STICKERS:
         raise HTTPException(
             status_code=422,
-            detail=f"Detected {len(face_colors)} stickers; need 54 ({need} more face(s))",
+            detail=(
+                f"Detected {len(face_colors)} stickers from {len(payloads)} image(s); "
+                f"a full cube needs {FACE_COUNT} faces ({NUM_STICKERS} stickers)"
+            ),
         )
     if unmatched:
         raise HTTPException(

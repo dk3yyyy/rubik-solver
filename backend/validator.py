@@ -122,9 +122,17 @@ def _parity(permutation: Sequence[int]) -> int:
     return inversions % 2
 
 
-def check_solvable(facelet: str) -> ValidationResult:
-    """Piece identity, corner twist, edge flip and permutation parity."""
-    text = facelet.strip().upper()
+def check_solvable(facelet: object) -> ValidationResult:
+    """Piece identity, corner twist, edge flip and permutation parity.
+
+    Runs the format checks first, so a direct call with short or non-string
+    input returns a format failure instead of raising an IndexError.
+    """
+    fmt = check_format(facelet)
+    if not fmt.ok:
+        return fmt
+
+    text = str(facelet).strip().upper()
     canonical = _canonicalize(text)
 
     corner_perm: List[int] = []
@@ -170,11 +178,12 @@ def check_solvable(facelet: str) -> ValidationResult:
 
 
 def check_facelet(facelet: object) -> ValidationResult:
-    """Run format checks, then solvability checks."""
-    fmt = check_format(facelet)
-    if not fmt.ok:
-        return fmt
-    return check_solvable(facelet)  # type: ignore[arg-type]
+    """Validate a facelet string, reporting why it fails.
+
+    ``check_solvable`` performs the format checks too, so this is an alias kept
+    for the clearer name at the call sites.
+    """
+    return check_solvable(facelet)
 
 
 def validate_facelet(facelet: object) -> Tuple[bool, Optional[str]]:
