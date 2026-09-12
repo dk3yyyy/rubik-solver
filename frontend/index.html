@@ -42,6 +42,12 @@
         <div class="controls" role="group" aria-label="Cube controls">
           <div class="timer-display">
             <div id="timer" class="timer-time" role="timer" aria-label="Solve timer">00:00.00</div>
+            <div id="inspection-timer" class="inspection-timer" role="timer" aria-label="Inspection countdown"></div>
+          </div>
+
+          <div class="stats-panel" role="region" aria-label="Speedcubing statistics">
+            <h3>Statistics</h3>
+            <div id="speedcubing-stats" class="speedcubing-stats"></div>
           </div>
 
           <div class="best-times-panel">
@@ -118,6 +124,7 @@
             </div>
             <div class="history-actions">
               <button id="btn-copy" class="btn btn-small" type="button">Copy</button>
+              <button id="btn-copy-link" class="btn btn-small" type="button">Copy Link</button>
               <button id="btn-invert" class="btn btn-small" type="button">Invert</button>
               <button id="btn-optimize" class="btn btn-small" type="button">Optimize</button>
               <button id="btn-clear-history" class="btn btn-small" type="button">Clear</button>
