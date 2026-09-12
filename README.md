@@ -37,7 +37,7 @@ This project is an interactive Rubik's cube solver web application. Users can sc
 
 - **Guided cube entry** — tap a colour, then tap the stickers on a six-face net to type in a scrambled physical cube
 - **Move prediction** — the moment the cube is filled in, the app reports how many moves the solution takes
-- **Learner-friendly playback** — a speed slider from 0.1s to 3s per move, plus Next and Prev for stepping one move at a time
+- **Learner-friendly playback** — a speed slider from 0.1s to 3s per move, Next and Prev for stepping one move at a time, and the move to turn next highlighted in the solution list
 - **3D Interactive Cube** — drag to rotate, click to twist faces (Three.js)
 - **Random Scramble** — generates legal, random cube states
 - **Two-Phase Solver** — solves any valid cube state in ≤ 22 moves
@@ -390,9 +390,11 @@ The usual flow is to type in the cube you are holding, then follow the solution 
 3. **Read the prediction** — once all 54 stickers are set the app solves the cube automatically and
    reports the number of moves, for example `21 moves`.
 4. **Follow along** — set the speed slider to something you can keep up with, then press **Play** to
-   watch the solution run in real time. Press **Pause** at any point and **Play** again to carry on.
+   watch the solution run in real time. The move to turn next is highlighted in the solution list and
+   the ones already done are dimmed, so there is nothing to count. Press **Pause** at any point and
+   **Play** again to carry on.
 5. **Or step through manually** — **Next** applies a single move, **Prev** takes it back, so you can
-   match each move on the real cube before moving on.
+   match each move on the real cube before moving on. The highlight follows you either way.
 6. **Fix mistakes** — if you tapped a sticker wrong, pick the colour again and re-tap it, or use the
    **clear** swatch to empty it. The prediction updates when the cube is complete again.
 

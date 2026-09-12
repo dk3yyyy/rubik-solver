@@ -134,8 +134,25 @@ body {
   font-family: var(--font-mono); font-size: 12px;
   color: var(--ink); background: var(--paper);
   padding: 8px; border-radius: 6px; min-height: 32px;
-  word-break: break-all; line-height: 1.4;
+  line-height: 1.4;
   border: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+}
+
+/* The solution is a list of moves, and while following along one of them is the
+   move you are on. Showing it as one string left people counting tokens. */
+.move-chip {
+  font-family: var(--font-mono); font-size: 12px;
+  padding: 1px 5px; border-radius: 4px;
+  background: var(--surface); border: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.move-chip.is-done { opacity: 0.4; }
+
+.move-chip.is-current {
+  background: var(--orange); border-color: var(--orange);
+  color: #fff; font-weight: 600;
 }
 
 .history-actions {

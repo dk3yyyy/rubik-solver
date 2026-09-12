@@ -30,10 +30,12 @@ import {
   invertMove,
   invertSequence,
   isLocalOrigin,
+  movePlaybackState,
   moveToRotation,
   normalFromEuler,
   optimizeMoves,
   parseMove,
+  playbackCounterText,
   readApiResponse,
   rotateVector,
 } from '../src/cube-logic.js';
@@ -306,4 +308,33 @@ test('a 500 from our own API is not mistaken for an unreachable backend', async 
   const error = await readApiResponse(response).catch((thrown) => thrown);
   assert.ok(!(error instanceof BackendUnreachable), error.name);
   assert.equal(describeApiError(error, null, 'http://localhost:8000'), 'Solver failed');
+});
+
+test('the move you are on is current, the ones behind it are done', () => {
+  assert.equal(movePlaybackState(0, 0), 'current');
+  assert.equal(movePlaybackState(1, 0), 'pending');
+  assert.equal(movePlaybackState(0, 3), 'done');
+  assert.equal(movePlaybackState(3, 3), 'current');
+  assert.equal(movePlaybackState(4, 3), 'pending');
+});
+
+test('exactly one move is current part way through a solution', () => {
+  const states = Array.from({ length: 22 }, (_, index) => movePlaybackState(index, 7));
+  assert.equal(states.filter((state) => state === 'current').length, 1);
+  assert.equal(states.filter((state) => state === 'done').length, 7);
+  assert.equal(states.filter((state) => state === 'pending').length, 14);
+});
+
+test('nothing is current once the solution has played out', () => {
+  const states = Array.from({ length: 5 }, (_, index) => movePlaybackState(index, 5));
+  assert.deepEqual(states, ['done', 'done', 'done', 'done', 'done']);
+});
+
+test('the counter agrees with the mark on the solution', () => {
+  // Both come from the cursor, so a "Move 3/22" counter and a mark on the fourth
+  // chip can never appear together.
+  for (const cursor of [0, 1, 7, 22]) {
+    assert.equal(playbackCounterText(cursor, 22), cursor === 0 ? '0/22 moves' : `Move ${cursor}/22`);
+  }
+  assert.equal(playbackCounterText(0, 0), '0 moves');
 });

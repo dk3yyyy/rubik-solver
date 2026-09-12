@@ -8,8 +8,10 @@ import {
   STICKER_PLACEMENTS,
   describeApiError,
   invertMove,
+  movePlaybackState,
   moveToRotation,
   optimizeMoves,
+  playbackCounterText,
   readApiResponse,
 } from './cube-logic.js';
 import { CubeInput } from './cube-input.js';
@@ -498,6 +500,9 @@ class App {
       this.startTimerDisplay();
 
       this.history.setScramble(this.scrambleMoves);
+      // The scramble replaces the cube, so a solution for the previous one is no
+      // longer about anything on screen.
+      this.history.setSolution([]);
       this.updateHistoryDisplay();
 
       await this.cube.playSolution(this.scrambleMoves);
@@ -549,9 +554,7 @@ class App {
       this.updateHistoryDisplay();
 
       this.showPrediction(data.move_count, this.solution.length === 0);
-      this.moveCounterEl.textContent = this.solution.length
-        ? `0/${this.solution.length} moves`
-        : '0 moves';
+      this.updatePlaybackDisplay();
       this.setStatus(
         this.solution.length
           ? `Your cube needs ${data.move_count} moves. `
@@ -603,15 +606,18 @@ class App {
       );
     }
 
-    // Any edit invalidates a solution that was computed for the previous entry.
-    if (this.solvedInputFacelet && state.facelet !== this.solvedInputFacelet) {
+    // Any edit invalidates a solution computed for the previous entry. Testing
+    // the solution rather than the recorded facelet matters: loadFacelet and the
+    // scan clear that record before setting the new cube, and a solution left
+    // over from the previous cube could still be played against the new one.
+    if (this.solution.length && state.facelet !== this.solvedInputFacelet) {
       this.solution = [];
       this.solvedState = null;
       this.solvedInputFacelet = null;
       this.currentMoveIndex = 0;
       this.history.setSolution([]);
       this.updateHistoryDisplay();
-      this.moveCounterEl.textContent = '0 moves';
+      this.updatePlaybackDisplay();
       this.clearPrediction();
     }
 
@@ -670,7 +676,7 @@ class App {
     this.history.clear();
     this.updateHistoryDisplay();
     this.clearPrediction();
-    this.moveCounterEl.textContent = '0 moves';
+    this.updatePlaybackDisplay();
     this.cubeInput.clear();
     this.setStatus('Cleared. Enter your cube again.', 'info');
   }
@@ -701,7 +707,7 @@ class App {
       const move = this.solution[this.currentMoveIndex];
       this.currentMoveIndex += 1;
       await this.cube.enqueue(move, true);
-      this.moveCounterEl.textContent = `Move ${this.currentMoveIndex}/${this.solution.length}`;
+      this.updatePlaybackDisplay();
     }
 
     if (this.currentMoveIndex >= this.solution.length) {
@@ -740,7 +746,7 @@ class App {
       const move = this.solution[this.currentMoveIndex];
       this.currentMoveIndex += 1;
       await this.cube.enqueue(move, true);
-      this.moveCounterEl.textContent = `Move ${this.currentMoveIndex}/${this.solution.length}`;
+      this.updatePlaybackDisplay();
       if (this.currentMoveIndex === this.solution.length) this.verifyRenderedState();
     }
   }
@@ -750,7 +756,7 @@ class App {
       const move = this.solution[this.currentMoveIndex - 1];
       this.currentMoveIndex -= 1;
       await this.cube.enqueue(invertMove(move), true);
-      this.moveCounterEl.textContent = `Move ${this.currentMoveIndex}/${this.solution.length}`;
+      this.updatePlaybackDisplay();
     }
   }
 
@@ -770,7 +776,7 @@ class App {
     this.history.clear();
     this.updateHistoryDisplay();
     this.clearPrediction();
-    this.moveCounterEl.textContent = '0 moves';
+    this.updatePlaybackDisplay();
     if (this.cubeInput) this.cubeInput.clear();
     this.setStatus('Reset to solved state', 'info');
   }
@@ -908,9 +914,49 @@ class App {
     this.renderTimer();
   }
 
+  /**
+   * The solution is a list of moves and, during playback, one of them is the move
+   * you are on. Rendering it as an undifferentiated string left people counting
+   * tokens in a 20 move sequence to work out what to turn next.
+   */
+  renderMoves(container, moves) {
+    container.innerHTML = '';
+    moves.forEach((move, index) => {
+      const chip = document.createElement('span');
+      chip.className = 'move-chip';
+      chip.dataset.index = String(index);
+      chip.textContent = move;
+      container.appendChild(chip);
+    });
+  }
+
+  /** Mark the move the person should be turning: done behind, next ahead. */
+  markCurrentMove() {
+    if (!this.solutionDisplay) return;
+    for (const chip of this.solutionDisplay.querySelectorAll('.move-chip')) {
+      const index = Number(chip.dataset.index);
+      const state = movePlaybackState(index, this.currentMoveIndex);
+      chip.classList.toggle('is-done', state === 'done');
+      chip.classList.toggle('is-current', state === 'current');
+    }
+  }
+
+  /**
+   * The counter and the mark on the solution, both from the one cursor, so they
+   * can never disagree about which move you are on.
+   */
+  updatePlaybackDisplay() {
+    this.moveCounterEl.textContent = playbackCounterText(
+      this.currentMoveIndex,
+      this.solution.length,
+    );
+    this.markCurrentMove();
+  }
+
   updateHistoryDisplay() {
-    this.scrambleDisplay.textContent = this.history.format(this.history.scramble);
-    this.solutionDisplay.textContent = this.history.format(this.history.solution);
+    this.renderMoves(this.scrambleDisplay, this.history.scramble);
+    this.renderMoves(this.solutionDisplay, this.history.solution);
+    this.markCurrentMove();
   }
 
   copyHistory() {
