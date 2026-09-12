@@ -40,7 +40,7 @@ This project is an interactive Rubik's cube solver web application. Users can sc
 - **Guided cube entry** — tap a colour, then tap the stickers on a six-face net to type in a scrambled physical cube
 - **Move prediction** — the moment the cube is filled in, the app reports how many moves the solution takes
 - **Learner-friendly playback** — a speed slider from 0.1s to 3s per move, Next and Prev for stepping one move at a time, and the move to turn next highlighted in the solution list
-- **3D Interactive Cube** — drag to rotate, click to twist faces (Three.js)
+- **3D Interactive Cube** — drag to rotate the camera around it (Three.js)
 - **Random Scramble** — generates legal, random cube states
 - **Two-Phase Solver** — solves any valid cube state in ≤ 22 moves
 - **Webcam Cube Scanning** — detect a physical cube via camera and import its state
@@ -408,9 +408,24 @@ The usual flow is to type in the cube you are holding, then follow the solution 
 6. **Fix mistakes** — if you tapped a sticker wrong, pick the colour again and re-tap it, or use the
    **clear** swatch to empty it. The prediction updates when the cube is complete again.
 
-Random practice is available too: **Scramble** generates a legal random state, and **Solve** finds
-its solution. You can also paste a 54-character facelet string, or use **Scan with webcam** to read
-a face at a time; a scan is loaded into the net so you can correct any sticker it got wrong.
+Random practice is available too: **Scramble** generates a legal random state, and **Solve** works out
+the solution and plays it on the cube. You can also paste a 54-character facelet string.
+
+**Scan with webcam** reads the cube a face at a time. Capture the six faces in the order U, R, F, D,
+L, B, holding each one straight on and filling the frame. Every face has a fixed orientation, and the
+app names the next face and how to hold it as you go:
+
+| Face | Centre | Hold the cube |
+| U | white | white facing the camera, blue edge up |
+| R | red | red facing the camera, white edge up |
+| F | green | green facing the camera, white edge up |
+| D | yellow | yellow facing the camera, green edge up |
+| L | orange | orange facing the camera, white edge up |
+| B | blue | blue facing the camera, white edge up |
+
+The scan is loaded into the net so you can correct any sticker it got wrong before solving. It needs
+the camera, which browsers only allow over https or on localhost, so scanning will not work from a
+plain http address on your local network.
 
 ### Keyboard shortcuts
 

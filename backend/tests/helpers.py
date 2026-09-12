@@ -44,3 +44,10 @@ def base64_face(letters: Sequence[str]) -> str:
 def solved_faces() -> List[str]:
     """One base64 image per face, in U, R, F, D, L, B order."""
     return [base64_face(letter * 9) for letter in "URFDLB"]
+
+
+def base64_ambiguous_face(cell: int = 60) -> str:
+    """One face of mid grey stickers, which the detector cannot classify."""
+    img = np.zeros((cell * 3, cell * 3, 3), dtype=np.uint8)
+    img[:, :] = AMBIGUOUS_BGR
+    return base64.b64encode(jpeg_bytes(img)).decode()
