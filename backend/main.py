@@ -285,7 +285,7 @@ def _require_webcam() -> Any:
     return webcam
 
 
-@app.get("/api/health")
+@app.get("/api/health", tags=["health"])
 async def health() -> dict[str, Any]:
     """Liveness for a platform health check, and a quick manual look.
 
@@ -296,8 +296,8 @@ async def health() -> dict[str, Any]:
     return {"status": "ok", "solver_ready": solver.is_ready(), "webcam_available": WEBCAM_AVAILABLE}
 
 
-@app.get("/api/scramble", response_model=ScrambleResponse)
-@app.post("/api/scramble", response_model=ScrambleResponse)
+@app.get("/api/scramble", response_model=ScrambleResponse, tags=["cube"])
+@app.post("/api/scramble", response_model=ScrambleResponse, tags=["cube"])
 async def get_scramble() -> ScrambleResponse:
     """Generate a random scramble and the cube state it produces."""
     _require_solver()
@@ -308,7 +308,7 @@ async def get_scramble() -> ScrambleResponse:
     return ScrambleResponse(scramble=scramble, state=state)
 
 
-@app.post("/api/solve", response_model=SolveResponse)
+@app.post("/api/solve", response_model=SolveResponse, tags=["cube"])
 async def solve_cube(req: StateRequest) -> SolveResponse:
     """Solve a cube from its facelet string."""
     _require_solver()
@@ -332,14 +332,14 @@ async def solve_cube(req: StateRequest) -> SolveResponse:
     return SolveResponse(solution=solution, move_count=len(moves), solved_state=solved_state)
 
 
-@app.post("/api/validate", response_model=ValidateResponse)
+@app.post("/api/validate", response_model=ValidateResponse, tags=["cube"])
 async def validate_cube(req: StateRequest) -> ValidateResponse:
     """Validate a facelet string. Does not need the solver tables."""
     result = check_facelet(_normalize(req.state))
     return ValidateResponse(valid=result.ok, error=result.error)
 
 
-@app.post("/api/step", response_model=StepResponse)
+@app.post("/api/step", response_model=StepResponse, tags=["cube"])
 async def step_cube(req: StepRequest) -> StepResponse:
     """Return one move of the solution at ``step`` and the resulting state."""
     _require_solver()
@@ -371,7 +371,7 @@ async def step_cube(req: StepRequest) -> StepResponse:
     )
 
 
-@app.post("/api/webcam-scan", response_model=WebcamScanResponse)
+@app.post("/api/webcam-scan", response_model=WebcamScanResponse, tags=["scan"])
 async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
     """Detect the cube state from base64 face images.
 
@@ -476,8 +476,8 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
     )
 
 
-@app.post("/api/detect", response_model=DetectResponse)
-@app.post("/api/detect/single", response_model=DetectResponse)
+@app.post("/api/detect", response_model=DetectResponse, tags=["scan"])
+@app.post("/api/detect/single", response_model=DetectResponse, tags=["scan"])
 async def detect_single_face(file: UploadFile = File(...)) -> DetectResponse:
     """Detect the nine stickers of a single uploaded face image."""
     detector = _require_webcam()

@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ALLOWED_ORIGINS=*
+      # Leave TRUST_PROXY unset here. This file publishes port 8000 directly, and
+      # with no proxy in front every caller can send its own X-Forwarded-For and
+      # so choose its own rate-limit bucket. Set it in your own environment only
+      # when a reverse proxy you control sits in front of the app.
+      # Set to 0 to disable the per-client rate limiter.
+      - RATE_LIMIT_MAX=60
+      - RATE_LIMIT_WINDOW=60
+    restart: unless-stopped
