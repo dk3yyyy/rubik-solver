@@ -115,6 +115,44 @@ def test_a_face_is_not_read_from_a_sticker_sized_crop():
     assert result["colours"] == SCRAMBLED, result["colours"]
 
 
+@pytest.mark.parametrize("coverage", [0.3, 0.5])
+@pytest.mark.parametrize("angle", [0, 21, 45])
+def test_a_cube_against_a_white_wall_is_still_read(coverage, angle):
+    # Nine white stickers against a white wall are the same colour as the wall,
+    # so a probe that compares colour alone says the pattern carries on into it
+    # and the frame is refused. The centre search has always refused these
+    # frames; a crop taken from the face's own outline used to be exempt, and
+    # applying the check to it without asking for the wall's *structure* took
+    # seven real frames off a 160-frame battery. Both edits are in this test:
+    # asked for the next cell's boundary, a flat wall is not the next cell.
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=coverage, angle=angle,
+                                      background=(245, 245, 245)))
+    result = analyse_face(frame)
+    assert result["found"], (coverage, angle, result["reason"])
+    assert result["colours"] == SCRAMBLED, (coverage, angle, result["colours"])
+
+
+def test_the_quad_probe_asks_for_the_next_cell_boundary_not_only_its_colour():
+    # The one thing a quad crop's probe asks for that a window crop's does not,
+    # pinned at the probe itself: a tiled surface beyond the crop has the colour
+    # *and* the boundary, a wall has only the colour, and the two have to be told
+    # apart or the framed tile gets in and the white wall goes out.
+    def extends(frame, structure):
+        work = webcam._working_frame(frame)
+        quad = webcam._quad_list(work)[0]
+        cx, cy, side = webcam._quad_rect(quad)
+        stats = webcam._crop_stats(webcam.warp_face(work, quad))
+        return webcam._pattern_extends(work, cx, cy, side, stats, structure=structure)
+
+    tiled = jpeg_roundtrip(make_framed_tiling_frame())
+    assert extends(tiled, structure=False) >= 1, "the tiling beyond the crop carries on"
+    assert extends(tiled, structure=True) >= 1, "and it carries on with its own lines"
+
+    wall = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=0.5, background=(245, 245, 245)))
+    assert extends(wall, structure=False) >= 1, "colour alone says the wall carries on"
+    assert extends(wall, structure=True) == 0, "the wall is flat, so it does not"
+
+
 @pytest.mark.parametrize("coverage", [0.5, 0.6, 0.7, 0.8, 0.9])
 def test_stickers_that_touch_are_still_read_as_a_face(coverage):
     # A cube whose stickers have no plastic visible between them: nine flat
@@ -209,16 +247,17 @@ def _probes_aimed_at_quads(frame):
 
     The check only sees the crop's position and size in the frame, so what it
     was pointed at is the whole of its evidence for a quad crop: this returns
-    the probes that were aimed at a detected quadrilateral's own rect.
+    the probes that were aimed at a detected quadrilateral's own rect, and
+    whether each one asked for the band's structure as well as its colour.
     """
     work = webcam._working_frame(frame)
     rects = [webcam._quad_rect(quad) for quad in webcam._quad_list(work)]
     probes = []
     real = webcam._pattern_extends
 
-    def recorder(probe_frame, cx, cy, side, stats):
-        probes.append((cx, cy, side))
-        return real(probe_frame, cx, cy, side, stats)
+    def recorder(probe_frame, cx, cy, side, stats, **kwargs):
+        probes.append((cx, cy, side, bool(kwargs.get("structure"))))
+        return real(probe_frame, cx, cy, side, stats, **kwargs)
 
     webcam._pattern_extends = recorder
     try:
@@ -262,6 +301,8 @@ def test_a_crop_read_from_a_quad_faces_the_continuation_check():
     assert result["found"] is False, result["colours"]
     assert hits, ("no probe was aimed at a quadrilateral, so the quad crop skipped "
                   "the continuation check")
+    assert any(probe[3] for probe in hits), (
+        "the probe on a quadrilateral's rect did not ask for the band's structure")
 
 
 def test_a_face_read_from_a_quad_is_still_checked_and_still_read():
@@ -275,6 +316,8 @@ def test_a_face_read_from_a_quad_is_still_checked_and_still_read():
     assert result["framed"] is True
     assert result["colours"] == SCRAMBLED
     assert hits, "the quad crop was accepted without the continuation check"
+    assert any(probe[3] for probe in hits), (
+        "the probe on a quadrilateral's rect did not ask for the band's structure")
 
 
 @pytest.mark.parametrize(
