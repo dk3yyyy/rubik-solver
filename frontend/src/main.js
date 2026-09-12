@@ -400,6 +400,11 @@ class App {
     this.solutionDisplay = document.getElementById('history-solution');
     this.bestTimesDisplay = document.getElementById('best-times');
     this.webcamHint = document.getElementById('webcam-hint');
+    this.webcamFaceOverlay = document.getElementById('webcam-face-overlay');
+    this.webcamConfidenceBar = document.getElementById('webcam-confidence-bar');
+    this.webcamConfidenceFill = document.getElementById('webcam-confidence-fill');
+    this.webcamConfidenceLabel = document.getElementById('webcam-confidence-label');
+    this.webcamAutoCaptureBtn = document.getElementById('webcam-auto-capture');
     this.faceletInput = document.getElementById('facelet-input');
     this.speedSlider = document.getElementById('speed-slider');
     this.speedLabelEl = document.getElementById('speed-label');
@@ -435,6 +440,7 @@ class App {
     document.getElementById('btn-load').addEventListener('click', () => this.loadFacelet());
     document.getElementById('btn-webcam').addEventListener('click', () => this.webcam());
     document.getElementById('webcam-capture').addEventListener('click', () => this.captureFace());
+    document.getElementById('webcam-auto-capture').addEventListener('click', () => this.toggleAutoCapture());
     document.getElementById('webcam-close').addEventListener('click', () => this.closeWebcam());
     document.getElementById('btn-copy').addEventListener('click', () => this.copyHistory());
     document.getElementById('btn-invert').addEventListener('click', () => this.invertScramble());
@@ -870,8 +876,23 @@ class App {
     const video = document.getElementById('webcam-video');
     this.capturedFaces = [];
     this.lastCapturePixels = null;
+    this.autoCaptureEnabled = false;
+    this.faceDetectionTimer = null;
+    this.lastFacePosition = null;
+    this.faceStableSince = null;
     this.updateWebcamHint();
     panel.hidden = false;
+
+    // Reset UI elements
+    if (this.webcamFaceOverlay) {
+      const box = this.webcamFaceOverlay.querySelector('.face-overlay-box');
+      if (box) box.classList.remove('is-detected');
+    }
+    if (this.webcamConfidenceBar) this.webcamConfidenceBar.hidden = true;
+    if (this.webcamAutoCaptureBtn) {
+      this.webcamAutoCaptureBtn.classList.remove('is-active');
+      this.webcamAutoCaptureBtn.setAttribute('aria-pressed', 'false');
+    }
 
     // mediaDevices only exists in a secure context, so a phone opening the app
     // over plain http on the local network has no camera API at all.
@@ -893,6 +914,7 @@ class App {
       // that never starts is reported here, rather than arriving at the scanner
       // as six black frames it cannot read.
       await video.play();
+      this.startFaceDetection();
     } catch (err) {
       this.setStatus('Camera: ' + ((err && err.message) || err), 'error');
       this.closeWebcam();
@@ -940,6 +962,19 @@ class App {
     }
     this.lastCapturePixels = pixels;
 
+    // Get confidence for this capture using the detect endpoint.
+    try {
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      const detectResult = await readApiResponse(await fetch(api('/detect-frame'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl }),
+      }));
+      this.showCaptureConfidence(detectResult.confidence || 0);
+    } catch (_err) {
+      // Detection failure is non-fatal — the capture still works.
+    }
+
     this.capturedFaces.push(canvas.toDataURL('image/jpeg', 0.9));
     this.updateWebcamHint();
 
@@ -948,6 +983,120 @@ class App {
     } else {
       const caught = SCAN_FACES[this.capturedFaces.length - 1];
       this.setStatus(`Captured ${caught ? caught.colour : 'face'} (${this.capturedFaces.length}/${FACE_COUNT})`, 'info');
+    }
+  }
+
+  /** Start polling the video feed for face detection. */
+  startFaceDetection() {
+    if (this.faceDetectionTimer) return;
+    this.faceDetectionTimer = setInterval(() => this.updateFaceDetection(), 500);
+  }
+
+  /** Analyse the current video frame and update the face detection overlay. */
+  async updateFaceDetection() {
+    const video = document.getElementById('webcam-video');
+    if (!video.videoWidth || video.paused) return;
+
+    // Draw current frame to a small canvas to keep the payload compact.
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 120;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+
+    try {
+      const result = await readApiResponse(await fetch(api('/detect-frame'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl }),
+      }));
+
+      this.handleFaceDetectionResult(result);
+    } catch (_err) {
+      // Detection failures are non-fatal: just skip this frame.
+    }
+  }
+
+  handleFaceDetectionResult(result) {
+    if (!this.webcamFaceOverlay) return;
+    const box = this.webcamFaceOverlay.querySelector('.face-overlay-box');
+    const text = this.webcamFaceOverlay.querySelector('.face-overlay-text');
+    if (!box) return;
+
+    if (result.face_detected) {
+      box.classList.add('is-detected');
+      if (text) {
+        text.textContent = result.confidence > 0.8
+          ? 'Face detected — ready to capture'
+          : 'Face detected — hold steady';
+      }
+
+      // Auto-capture: trigger when face is stable and confidence is high.
+      if (this.autoCaptureEnabled) {
+        this.checkAutoCapture(result);
+      }
+    } else {
+      box.classList.remove('is-detected');
+      if (text) text.textContent = 'Position cube face here';
+      this.lastFacePosition = null;
+      this.faceStableSince = null;
+    }
+  }
+
+  /** Track face position stability and auto-capture when ready. */
+  checkAutoCapture(result) {
+    const position = `${result.colours?.join(',') || ''}:${Math.round(result.coverage * 100)}`;
+    const now = Date.now();
+
+    if (this.lastFacePosition !== position) {
+      this.lastFacePosition = position;
+      this.faceStableSince = now;
+      return;
+    }
+
+    const stable = now - (this.faceStableSince || now) > 1000;
+    const highConfidence = result.confidence > 0.8;
+
+    if (stable && highConfidence) {
+      this.lastFacePosition = null;
+      this.faceStableSince = null;
+      this.captureFace();
+    }
+  }
+
+  /** Toggle the auto-capture feature on/off. */
+  toggleAutoCapture() {
+    this.autoCaptureEnabled = !this.autoCaptureEnabled;
+    if (this.webcamAutoCaptureBtn) {
+      this.webcamAutoCaptureBtn.classList.toggle('is-active', this.autoCaptureEnabled);
+      this.webcamAutoCaptureBtn.setAttribute('aria-pressed', String(this.autoCaptureEnabled));
+    }
+    if (this.autoCaptureEnabled) {
+      this.setStatus('Auto-capture enabled — hold the cube steady to capture automatically', 'info');
+    } else {
+      this.lastFacePosition = null;
+      this.faceStableSince = null;
+    }
+  }
+
+  /** Show the confidence bar after a capture. */
+  showCaptureConfidence(confidence) {
+    if (!this.webcamConfidenceBar || !this.webcamConfidenceFill || !this.webcamConfidenceLabel) return;
+    this.webcamConfidenceBar.hidden = false;
+    const pct = Math.round(confidence * 100);
+    this.webcamConfidenceFill.style.width = `${pct}%`;
+    this.webcamConfidenceFill.classList.remove('is-good', 'is-okay', 'is-poor');
+
+    if (confidence > 0.8) {
+      this.webcamConfidenceFill.classList.add('is-good');
+      this.webcamConfidenceLabel.textContent = `Good scan (${pct}%)`;
+    } else if (confidence >= 0.5) {
+      this.webcamConfidenceFill.classList.add('is-okay');
+      this.webcamConfidenceLabel.textContent = `Okay (${pct}%)`;
+    } else {
+      this.webcamConfidenceFill.classList.add('is-poor');
+      this.webcamConfidenceLabel.textContent = `Poor — retake (${pct}%)`;
     }
   }
 
@@ -995,6 +1144,10 @@ class App {
     if (this.currentStream) {
       this.currentStream.getTracks().forEach(t => t.stop());
       this.currentStream = null;
+    }
+    if (this.faceDetectionTimer) {
+      clearInterval(this.faceDetectionTimer);
+      this.faceDetectionTimer = null;
     }
     video.srcObject = null;
     panel.hidden = true;

@@ -577,6 +577,33 @@ async def detect_single_face(file: UploadFile = File(...)) -> DetectResponse:
     )
 
 
+class DetectFrameRequest(BaseModel):
+    """A single base64 frame for live face-detection analysis."""
+    image: str
+
+
+class DetectFrameResponse(BaseModel):
+    face_detected: bool
+    coverage: float
+    confidence: float
+    colours: List[Optional[str]]
+    grid_score: float
+
+
+@app.post("/api/detect-frame", response_model=DetectFrameResponse, tags=["scan"])
+async def detect_frame(req: DetectFrameRequest) -> DetectFrameResponse:
+    """Analyse a single webcam frame for face detection and stability.
+
+    Powers the live face-detection overlay and auto-capture. The frontend
+    sends frames periodically and uses the response to show whether a cube
+    face is clearly visible and well-positioned.
+    """
+    detector = _require_webcam()
+    content = _decode_base64_image(req.image)
+    result = detector.detect_face_stability(content)
+    return DetectFrameResponse(**result)
+
+
 # Keep /api answers JSON. The frontend is mounted at "/" below, which would
 # otherwise answer a mistyped or wrong-method API path with the static file
 # handler's HTML 404, and a JSON client cannot tell that apart from the backend
