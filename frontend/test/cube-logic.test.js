@@ -1,0 +1,169 @@
+/**
+ * The cube logic must agree with the Python solver, otherwise the animated cube
+ * shows a different state than the solution text describes. `facelets.json` is
+ * generated with rubik-solver-py and holds the facelet string the solver
+ * produces for each single move and for a few short sequences.
+ */
+
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import test from 'node:test';
+
+import {
+  FACES,
+  FACE_CELLS,
+  FACE_NORMALS,
+  STICKER_PLACEMENTS,
+  applyMoveToFacelet,
+  applyMovesToFacelet,
+  faceletAt,
+  formatMove,
+  invertMove,
+  invertSequence,
+  moveToRotation,
+  normalFromEuler,
+  optimizeMoves,
+  parseMove,
+  rotateVector,
+} from '../src/cube-logic.js';
+
+const fixtures = JSON.parse(
+  fs.readFileSync(new URL('./facelets.json', import.meta.url), 'utf8'),
+);
+const SOLVED = fixtures.solved;
+
+const SEQUENCES = {
+  sexy: "R U R' U'",
+  'tperm-ish': "R U R' U' R' F R2 U' R' U' R U R' F'",
+  'double-mix': 'U2 D2 R2 L2 F2 B2',
+  scramble1: "L2 D2 L2 B2 D L2 R2 D2 B2 U' F2 U2 B U2 L' B L2 B2 U2 L2 R2 U'",
+};
+
+test('every single move matches the solver', () => {
+  for (const [move, expected] of Object.entries(fixtures.singleMoves)) {
+    assert.equal(applyMoveToFacelet(SOLVED, move), expected, `move ${move}`);
+  }
+});
+
+test('prime moves are the inverse of their clockwise move', () => {
+  for (const face of FACES) {
+    const once = applyMoveToFacelet(SOLVED, face);
+    assert.equal(applyMoveToFacelet(once, `${face}'`), SOLVED, face);
+  }
+});
+
+test('double moves match the solver and equal two quarter turns', () => {
+  for (const face of FACES) {
+    const twice = applyMoveToFacelet(applyMoveToFacelet(SOLVED, face), face);
+    assert.equal(twice, fixtures.singleMoves[`${face}2`], face);
+  }
+});
+
+test('move sequences match the solver', () => {
+  for (const [name, expected] of Object.entries(fixtures.sequences)) {
+    const moves = SEQUENCES[name].split(' ');
+    assert.equal(applyMovesToFacelet(SOLVED, moves), expected, name);
+  }
+});
+
+test('the previous view of a sequence restores the solved cube', () => {
+  const moves = SEQUENCES.scramble1.split(' ');
+  const scrambled = applyMovesToFacelet(SOLVED, moves);
+  assert.equal(applyMovesToFacelet(scrambled, invertSequence(moves)), SOLVED);
+});
+
+test('the facelet grid is a bijection over all 54 stickers', () => {
+  const seen = new Set();
+  for (const face of FACES) {
+    FACE_CELLS[face].forEach((cell, index) => {
+      const normal = FACE_NORMALS[face];
+      const key = `${cell}|${normal}`;
+      assert.ok(!seen.has(key), `duplicate sticker at ${key}`);
+      seen.add(key);
+      const lookup = faceletAt(cell, normal);
+      assert.equal(lookup.face, face);
+      assert.equal(lookup.index, index);
+    });
+  }
+  assert.equal(seen.size, 54);
+});
+
+test('the U face runs from the back of the cube to the front', () => {
+  // Regression: the U rows used to be reversed, mirroring the top face.
+  assert.deepEqual(FACE_CELLS.U[0], [-1, 1, -1]);
+  assert.deepEqual(FACE_CELLS.U[2], [1, 1, -1]);
+  assert.deepEqual(FACE_CELLS.U[6], [-1, 1, 1]);
+  assert.deepEqual(FACE_CELLS.U[8], [1, 1, 1]);
+});
+
+test('double turns are handled by moveToRotation', () => {
+  const rotation = moveToRotation('R2');
+  assert.equal(rotation.axis, 'x');
+  assert.equal(rotation.quarterTurns, 2);
+  assert.equal(moveToRotation('U').quarterTurns, -1);
+  assert.equal(moveToRotation("U'").quarterTurns, 1);
+});
+
+test('invertMove handles primes and doubles', () => {
+  assert.equal(invertMove('R'), "R'");
+  assert.equal(invertMove("R'"), 'R');
+  assert.equal(invertMove('R2'), 'R2');
+});
+
+test('parseMove rejects junk', () => {
+  assert.equal(parseMove('X'), null);
+  assert.equal(parseMove('R3'), null);
+  assert.equal(parseMove(''), null);
+  assert.equal(parseMove(null), null);
+});
+
+test('formatMove normalises accumulated turns', () => {
+  assert.equal(formatMove('R', 1), 'R');
+  assert.equal(formatMove('R', 2), 'R2');
+  assert.equal(formatMove('R', 3), "R'");
+  assert.equal(formatMove('R', 4), '');
+  assert.equal(formatMove('R', -1), "R'");
+});
+
+test('optimizeMoves cancels and combines same-face turns', () => {
+  assert.deepEqual(optimizeMoves(['R', 'R']), ['R2']);
+  assert.deepEqual(optimizeMoves(['R', "R'"]), []);
+  assert.deepEqual(optimizeMoves(['R', 'R', 'R']), ["R'"]);
+  assert.deepEqual(optimizeMoves(['R', 'R2']), ["R'"]);
+  assert.deepEqual(optimizeMoves(['R2', 'R2']), []);
+  assert.deepEqual(optimizeMoves(['U', 'R', 'U']), ['U', 'R', 'U']);
+  assert.deepEqual(optimizeMoves(["U'", 'U']), []);
+});
+
+test('optimizeMoves preserves the resulting cube state', () => {
+  const moves = SEQUENCES['tperm-ish'].split(' ');
+  const optimized = optimizeMoves(moves);
+  assert.equal(
+    applyMovesToFacelet(SOLVED, optimized),
+    applyMovesToFacelet(SOLVED, moves),
+  );
+});
+
+test('rotateVector turns a right-angle the right way', () => {
+  assert.deepEqual(rotateVector([0, 0, 1], 'y', 1), [1, 0, 0]);
+  assert.deepEqual(rotateVector([1, 0, 0], 'y', 1), [0, 0, -1]);
+  assert.deepEqual(rotateVector([0, 1, 0], 'x', 1), [0, 0, 1]);
+  assert.deepEqual(rotateVector([1, 0, 0], 'z', 1), [0, 1, 0]);
+  assert.deepEqual(rotateVector([1, 2, 3], 'x', 4), [1, 2, 3]);
+});
+
+test('every sticker plane faces outwards', () => {
+  // Regression: U and D carried each other's rotation, so both planes faced
+  // into the cube and were culled, leaving dark top and bottom faces.
+  const round = (n) => Math.round(n * 1000) / 1000;
+  for (const { face, position, rotation } of STICKER_PLACEMENTS) {
+    const normal = normalFromEuler(rotation).map(round);
+    const expected = FACE_NORMALS[face].map(round);
+    assert.deepEqual(normal, expected, `sticker ${face}`);
+
+    const offsetMatchesFace = FACE_NORMALS[face].some(
+      (component, axis) => component !== 0 && Math.sign(position[axis]) === Math.sign(component),
+    );
+    assert.ok(offsetMatchesFace, `sticker ${face} is not offset towards its face`);
+  }
+});
