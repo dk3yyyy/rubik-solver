@@ -7,6 +7,7 @@
  */
 
 import {
+  CB_FACE_COLOURS,
   FACE_COLOURS,
   FACE_NET,
   FACE_ORDER,
@@ -166,21 +167,41 @@ export class CubeInput {
   }
 
   refresh() {
+    // The colourblind palette is a different set of colours rather than a
+    // filter over the same ones, so the active palette is chosen here. The
+    // pattern overlay is what carries the face for a reader who cannot
+    // separate the colours at all, and the letter in the label says the same
+    // thing to a screen reader.
+    const colorblind = document.documentElement.classList.contains('cb-mode');
+    const palette = colorblind ? CB_FACE_COLOURS : FACE_COLOURS;
     for (const swatch of this.paletteEl.querySelectorAll('.swatch')) {
       swatch.classList.toggle('is-active', swatch.dataset.face === this.brush);
+      const swatchColours = palette[swatch.dataset.face];
+      if (swatchColours) {
+        swatch.style.setProperty('--swatch-colour', swatchColours.hex);
+      }
     }
     for (const cell of this.netEl.querySelectorAll('.sticker')) {
       const face = cell.dataset.face;
       const offset = Number(cell.dataset.offset);
       const sticker = this.stickers[this.indexFor(face, offset)];
-      const colours = sticker ? FACE_COLOURS[sticker] : null;
+      const colours = sticker ? palette[sticker] : null;
       cell.classList.toggle('is-empty', !colours);
       cell.classList.toggle('is-centre', offset === CENTRE);
       cell.style.background = colours ? colours.hex : '';
+      cell.classList.remove('cb-pattern-U', 'cb-pattern-R', 'cb-pattern-F',
+        'cb-pattern-D', 'cb-pattern-L', 'cb-pattern-B');
+      if (colorblind && colours) {
+        cell.classList.add(`cb-pattern-${sticker}`);
+        cell.dataset.cbLetter = sticker;
+      } else {
+        delete cell.dataset.cbLetter;
+      }
       const position = offset + 1;
+      const spelled = colorblind && colours ? ` (${sticker})` : '';
       cell.setAttribute(
         'aria-label',
-        `${FACE_LABEL[face]} sticker ${position}, ${colours ? colours.name : 'empty'}`,
+        `${FACE_LABEL[face]} sticker ${position}, ${colours ? colours.name : 'empty'}${spelled}`,
       );
       cell.title = colours ? colours.name : 'empty';
     }

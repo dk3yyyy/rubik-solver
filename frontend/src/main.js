@@ -3,6 +3,7 @@
 import {
   FACES,
   FACE_CELLS,
+  CB_FACE_COLOURS,
   FACE_COLOURS,
   FACE_NORMALS,
   SCAN_FACES,
@@ -414,6 +415,11 @@ class App {
     this.predictionTimer = null;
     this.lastMirrored = null;
     this.solvedInputFacelet = null;
+    this.themeToggle = document.getElementById('theme-toggle');
+    this.themeIcon = document.getElementById('theme-icon');
+    this.cbToggle = document.getElementById('cb-toggle');
+    this.colorblindMode = false;
+    this.ariaLive = document.getElementById('aria-live');
     this.stats = new SpeedcubingStats();
     this.inspectionActive = false;
     this.inspectionTimeLeft = 0;
@@ -427,9 +433,32 @@ class App {
     this.init();
   }
 
+  init() {
+    const container = document.getElementById('cube-canvas');
+    this.cube = new Cube3D(container);
+    this.cube.setMoveDuration(Number(this.speedSlider.value));
+    this.cubeInput = new CubeInput(
+      document.getElementById('cube-net'),
+      document.getElementById('cube-palette'),
+      { onChange: (state, meta) => this.onInputChange(state, meta) },
+    );
+    this.bindEvents();
+    this.updateSpeedLabel();
+    this.updateBestTimesDisplay();
+    this.updateInputStatus(this.cubeInput.getState());
+    this.setStatus('Fill in your cube below, or press Scramble to try a random one.', 'info');
+  }
+
 
 
   bindEvents() {
+    this.restorePreferences();
+    if (this.themeToggle) {
+      this.themeToggle.addEventListener('click', () => this.toggleTheme());
+    }
+    if (this.cbToggle) {
+      this.cbToggle.addEventListener('click', () => this.toggleColorblindMode());
+    }
     document.getElementById('btn-scramble').addEventListener('click', () => this.scramble());
     document.getElementById('btn-solve').addEventListener('click', () => this.solveAndPlay());
     document.getElementById('btn-reset').addEventListener('click', () => this.reset());
@@ -739,6 +768,18 @@ class App {
     if (!this.speedLabelEl) return;
     const ms = Number(this.speedSlider.value);
     this.speedLabelEl.textContent = `${(ms / 1000).toFixed(2)}s per move`;
+  }
+
+  // Called from every action the user triggers, and it had no definition at all:
+  // each scramble, solve and playback threw before it announced anything.
+  announce(message) {
+    if (!this.ariaLive) {
+      return;
+    }
+    this.ariaLive.textContent = '';
+    requestAnimationFrame(() => {
+      this.ariaLive.textContent = message;
+    });
   }
 
   /** Turn a failed request into something the user can act on. */
@@ -1391,6 +1432,102 @@ class App {
           this.statusEl.className = 'status';
         }
       }, 8000);
+    }
+  }
+  // The header carries a theme button and a colourblind button. Each needs a
+  // preference to write somewhere and something to apply, or pressing it does
+  // nothing at all, which is what these two buttons used to do.
+  restorePreferences() {
+    const prefersDark = window.matchMedia
+      && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    this.setTheme(this.readPreference('rubik-theme') || (prefersDark ? 'dark' : 'light'), false);
+    if (this.readPreference('rubik-cb-mode') === 'true') {
+      this.enableColorblindMode(false);
+    }
+  }
+
+  readPreference(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (err) {
+      return null; // private browsing: the choice simply does not persist
+    }
+  }
+
+  writePreference(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (err) {
+      // Nothing to be done about it: the toggle still works for this visit.
+    }
+  }
+
+  setTheme(theme, remember = true) {
+    const dark = theme === 'dark';
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    if (this.themeIcon) {
+      this.themeIcon.textContent = dark ? '☀️' : '🌙';
+    }
+    if (this.themeToggle) {
+      this.themeToggle.setAttribute('aria-pressed', dark ? 'true' : 'false');
+      this.themeToggle.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+    }
+    if (remember) {
+      this.writePreference('rubik-theme', dark ? 'dark' : 'light');
+    }
+  }
+
+  toggleTheme() {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    this.setTheme(dark ? 'light' : 'dark');
+    this.announce(dark ? 'Light mode' : 'Dark mode');
+  }
+
+  toggleColorblindMode() {
+    if (this.colorblindMode) {
+      this.disableColorblindMode();
+    } else {
+      this.enableColorblindMode(true);
+    }
+  }
+
+  enableColorblindMode(announceChange) {
+    this.colorblindMode = true;
+    document.documentElement.classList.add('cb-mode');
+    this.applyPalette(CB_FACE_COLOURS);
+    if (this.cbToggle) {
+      this.cbToggle.setAttribute('aria-pressed', 'true');
+    }
+    this.writePreference('rubik-cb-mode', 'true');
+    if (announceChange) {
+      this.announce('Colour-blind friendly palette on');
+      this.setStatus('High-contrast colours and sticker patterns applied.', 'success');
+    }
+  }
+
+  disableColorblindMode() {
+    this.colorblindMode = false;
+    document.documentElement.classList.remove('cb-mode');
+    this.applyPalette(FACE_COLOURS);
+    if (this.cbToggle) {
+      this.cbToggle.setAttribute('aria-pressed', 'false');
+    }
+    this.writePreference('rubik-cb-mode', 'false');
+    this.announce('Standard palette restored');
+    this.setStatus('Standard palette restored.', 'info');
+  }
+
+  applyPalette(palette) {
+    for (const [face, { hex }] of Object.entries(palette)) {
+      COLORS[face] = parseInt(hex.slice(1), 16);
+    }
+    // A stored preference is applied while the page is still starting, and the
+    // cube may not exist yet.
+    if (this.cube) {
+      this.cube.updateStickers(this.currentFacelet);
+    }
+    if (this.cubeInput) {
+      this.cubeInput.refresh();
     }
   }
 }
