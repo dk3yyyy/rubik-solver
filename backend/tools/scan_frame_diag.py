@@ -24,8 +24,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from webcam import (  # noqa: E402
-    _centre_square,
     _rotated,
+    _rotated_offset,
+    _square_at,
+    _working_frame,
     analyse_face,
     warp_face,
     _quad_candidates,
@@ -53,11 +55,17 @@ def gather(paths: list[str]) -> list[Path]:
 def crop_for(img: np.ndarray, result: dict) -> np.ndarray:
     """Rebuild the crop the scanner settled on, so it can be marked up."""
     if result["source"] == "quad":
-        quad = _quad_candidates(img)
+        quad = _quad_candidates(_working_frame(img))
         if quad is not None:
-            return warp_face(img, quad)
-    square = _centre_square(img, result["scale"] or 0.6)
-    return _rotated(square, result["angle"])
+            return warp_face(_working_frame(img), quad)
+    work = _working_frame(img)
+    height, width = work.shape[:2]
+    short = float(min(height, width))
+    offset = result.get("offset") or (0.0, 0.0)
+    frame = _rotated(work, result["angle"]) if result["angle"] else work
+    ox, oy = _rotated_offset(offset[0] * short, offset[1] * short, result["angle"])
+    crop = _square_at(frame, width / 2.0 + ox, height / 2.0 + oy, (result["scale"] or 0.6) * short)
+    return crop if crop is not None else work
 
 
 def mark(img: np.ndarray) -> np.ndarray:
@@ -86,8 +94,10 @@ def report(path: Path, output: Path | None) -> bool:
     print(f"  nine stickers : {stickers}")
     print(f"  centre        : {result['colours'][4]}")
     print(
-        "  crop          : source=%s scale=%.2f angle=%.0f  (face quad covered %.0f%% of the frame)"
-        % (result["source"] or "-", result["scale"], result["angle"], 100 * result["coverage"])
+        "  crop          : source=%s scale=%.2f angle=%.0f offset=(%.2f, %.2f)  "
+        "(crop spans %.0f%% of the shorter side)"
+        % (result["source"] or "-", result["scale"], result["angle"],
+           result["offset"][0], result["offset"][1], 100 * result["coverage"])
     )
     print(f"  found         : {result['found']}  confidence={result['confidence']}")
     if result["reason"]:

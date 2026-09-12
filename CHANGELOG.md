@@ -14,11 +14,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wall, desk and shirt. A frame that holds no readable cube face is now reported
   as such, instead of being turned into nine stickers and blamed on the centre
   colour.
-- A cube that is not held dead square is read correctly. The grid is fitted to a
-  face-sized quadrilateral when one is found, and otherwise searched over a few
-  sizes and small rotations of the middle of the frame, so a cube filling the
+- A cube that is not held dead square is read correctly. A face-sized
+  quadrilateral is straightened by perspective when one is found, and sought
+  otherwise over positions, sizes and small rotations, so a cube filling the
   picture at an angle no longer has its edge stickers sampled from the
   background.
+
+### Changed
+- The frame sampler searches the whole picture for the face, not the middle of
+  it. A cube held off centre, at arm's length or against a bright desk used to be
+  refused, or read from whatever the middle of the frame happened to be: the
+  search now starts from every four-sided shape the edge detector finds, wherever
+  it is.
+- A frame is only read as a face when it shows the structure of one: nine cells
+  that read as cube colours, the boundaries between the stickers visible at the
+  thirds of the crop, and the same nine colours when the sampling grid moves a
+  little. Nine flat cells with dark lines between them is also what a tiled
+  floor, a radiator grille or a window looks like, so a crop whose pattern
+  carries on past its own edge is refused - a face ends, scenery does not.
+- Frames are read at a working size of 480 px on the short side, which keeps a
+  1080p frame from costing more than three times a VGA one.
+- The live face-detection overlay (`/api/detect-frame`) answers with the same
+  sampler the scan uses, so it can no longer mark a frame ready that the scan
+  then refuses.
+- `detect_face_colors` is documented as the sticker classifier for an
+  already-cropped face; `analyse_face` is the frame reader.
 
 ### Added
 - `backend/tools/scan_frame_diag.py` — read saved camera frames through the same

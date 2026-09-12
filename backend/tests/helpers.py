@@ -5,7 +5,7 @@ that OpenCV maps them into the hue bands the detector expects.
 """
 
 import base64
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 
 import cv2
 import numpy as np
@@ -37,13 +37,31 @@ def jpeg_bytes(img: np.ndarray) -> bytes:
     return buffer.tobytes()
 
 
+def jpeg_roundtrip(img: np.ndarray, quality: int = 90) -> np.ndarray:
+    """The frame as the scanner actually receives it.
+
+    The browser sends ``canvas.toDataURL('image/jpeg')`` and the endpoint
+    decodes it, so a frame that never went through JPEG is not quite the same
+    input. Tests that check what the sampler does with a *frame* - rather than
+    with one crop - use this.
+    """
+    ok, buffer = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    assert ok
+    return cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+
+
 def base64_face(letters: Sequence[str]) -> str:
     return base64.b64encode(jpeg_bytes(make_face_image(letters))).decode()
 
 
 def solved_faces() -> List[str]:
-    """One base64 image per face, in U, R, F, D, L, B order."""
-    return [base64_face(letter * 9) for letter in "URFDLB"]
+    """One base64 image per face, in U, R, F, D, L, B order.
+
+    Real frames rather than cropped sticker sheets: a scan reads a camera
+    picture of a cube, and the sampler refuses a sheet of flat colour with no
+    face in it. ``base64_face`` is still there for the sticker classifier.
+    """
+    return [base64_frame(letter * 9, coverage=0.6) for letter in "URFDLB"]
 
 
 def base64_ambiguous_face(cell: int = 60) -> str:
@@ -79,13 +97,28 @@ def make_frame(
     angle: float = 0.0,
     background=(70, 70, 70),
     quads=(),
+    gap: int = 5,
+    centre=(None, None),
+    side: Optional[int] = None,
+    brightness: float = 1.0,
+    noise: float = 0.0,
 ) -> np.ndarray:
     """A camera frame: a desk, optional background quads, and one cube face.
 
     ``coverage`` is the share of the shorter frame side the face spans, so 0.7
     is a cube held close and filling most of the picture, and 0.2 is one held at
-    arm's length. ``quads`` are (corners, BGR) pairs drawn behind the cube, for
-    testing that scenery does not get read as the face.
+    arm's length. ``side`` overrides it in pixels, for a face held so close it
+    is bigger than the frame. ``quads`` are (corners, BGR) pairs drawn behind
+    the cube, for testing that scenery does not get read as the face. ``gap`` is
+    the plastic between the stickers, and 0 is a face whose stickers touch,
+    which is the worst case for telling a face from a patch of flat colour.
+    ``centre`` moves the face off the middle of the frame, (`None`, `None`)
+    being the middle. ``brightness`` and ``noise`` are exposure and sensor
+    noise, for frames that are not evenly lit.
+
+    This is the one place frames are built: the adversarial harness in the
+    sandbox imports it rather than carrying its own copy, after a second copy
+    drifted far enough to hide a real defect behind a passing test.
     """
     height, width = frame_size
     img = np.full((height, width, 3), background, dtype=np.uint8)
@@ -93,10 +126,11 @@ def make_frame(
     for corners, colour in quads:
         cv2.fillConvexPoly(img, np.array(corners, dtype=np.int32), colour)
 
-    side = int(min(height, width) * coverage)
-    patch = make_face_patch(letters, size=180)
-    centre_x, centre_y = width / 2, height / 2
-    half = side / 2
+    size = int(min(height, width) * coverage) if side is None else int(side)
+    patch = make_face_patch(letters, size=180, gap=gap)
+    centre_x = width / 2 if centre[0] is None else centre[0]
+    centre_y = height / 2 if centre[1] is None else centre[1]
+    half = size / 2
     corners = np.array(
         [[-half, -half], [half, -half], [half, half], [-half, half]], dtype=np.float32
     )
@@ -118,6 +152,69 @@ def make_frame(
         np.full((180, 180), 255, dtype=np.uint8), matrix, (width, height)
     )
     img[mask > 0] = warped[mask > 0]
+
+    if brightness != 1.0:
+        img = np.clip(img.astype(np.float32) * brightness, 0, 255).astype(np.uint8)
+    if noise:
+        rng = np.random.default_rng(1)
+        img = np.clip(img.astype(np.float32) + rng.normal(0, noise, img.shape), 0, 255).astype(np.uint8)
+    return img
+
+
+def make_corner_frame(front: Sequence[str], top: Sequence[str], *, side: int = 300,
+                      skew=(90, 70), frame_size=(480, 640), centre=(None, None),
+                      gap: int = 5) -> np.ndarray:
+    """A cube held corner-on, so the camera sees two faces at once.
+
+    ``front`` is the face square to the camera, ``top`` the one receding from
+    its top edge: a normal way to hold a cube, and a frame in which the front
+    face is not the biggest thing in the picture.
+    """
+    height, width = frame_size
+    img = np.full((height, width, 3), 70, dtype=np.uint8)
+    centre_x = width / 2 if centre[0] is None else centre[0]
+    centre_y = height / 2 if centre[1] is None else centre[1]
+    half = side / 2
+    x0, y0, x1, y1 = centre_x - half, centre_y - half, centre_x + half, centre_y + half
+    source = np.array([[0, 0], [179, 0], [179, 179], [0, 179]], dtype=np.float32)
+
+    for letters, quad in (
+        (front, np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float32)),
+        (top, np.array([[x0, y0], [x1, y0], [x1 + skew[0], y0 - skew[1]],
+                        [x0 + skew[0], y0 - skew[1]]], dtype=np.float32)),
+    ):
+        patch = make_face_patch(letters, size=180, gap=gap)
+        matrix = cv2.getPerspectiveTransform(source, quad)
+        warped = cv2.warpPerspective(patch, matrix, (width, height))
+        mask = cv2.warpPerspective(np.full((180, 180), 255, dtype=np.uint8), matrix, (width, height))
+        img[mask > 0] = warped[mask > 0]
+    return img
+
+
+def make_tiled_frame(*, tile: int = 80, grout: int = 5, colour=(200, 220, 230),
+                     frame_size=(480, 640)) -> np.ndarray:
+    """A tiled floor or bathroom wall: nine flat cells between dark lines.
+
+    Scenery that looks like a face at a glance, and the reason the sampler
+    checks whether the pattern carries on past the crop.
+    """
+    height, width = frame_size
+    img = np.full((height, width, 3), colour, dtype=np.uint8)
+    for x in range(0, width, tile):
+        img[:, x:x + grout] = (30, 30, 30)
+    for y in range(0, height, tile):
+        img[y:y + grout, :] = (30, 30, 30)
+    return img
+
+
+def make_window_frame(*, frame_size=(480, 640)) -> np.ndarray:
+    """A bright window: panes between dark mullions, which read as stickers."""
+    height, width = frame_size
+    img = np.full((height, width, 3), 240, dtype=np.uint8)
+    img[:, 200:210] = (20, 20, 20)
+    img[:, 420:430] = (20, 20, 20)
+    img[150:160, :] = (20, 20, 20)
+    img[310:320, :] = (20, 20, 20)
     return img
 
 

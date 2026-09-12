@@ -507,10 +507,10 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
             f"Could not read {unmatched} sticker(s) on face(s) {', '.join(failing)}. "
             "Retake those faces straight on and evenly lit."
         )
-        # "Straight on and evenly lit" is the wrong advice for a frame that never
-        # had a cube face in it: there the fix is to move the camera closer. The
-        # two cases are worth telling apart, because only one of them is the
-        # user's lighting.
+        # "Straight on and evenly lit" is the wrong advice for a frame with no
+        # cube face in it: there the fix is to get the whole face in the picture
+        # with the plastic between its stickers visible. The two cases are worth
+        # telling apart, because only one of them is the user's lighting.
         unframed = [
             f"frame {index + 1} ({FACE_ORDER[index]})"
             for index, face in enumerate(per_face)
@@ -518,9 +518,9 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
         ]
         if unframed:
             detail += (
-                f" No cube face was found in {', '.join(unframed)}, and those frames "
-                "were read from the middle of the picture instead: hold one face "
-                "square to the camera and filling most of the frame."
+                f" No cube face was found in {', '.join(unframed)}: hold one face "
+                "square to the camera, filling most of the frame, with the plastic "
+                "between its stickers visible."
             )
         raise HTTPException(status_code=422, detail=detail)
 

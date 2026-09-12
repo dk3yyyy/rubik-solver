@@ -162,7 +162,7 @@ def test_a_scan_names_the_face_it_could_not_read(client):
 
 def test_an_unsolvable_scan_says_what_usually_causes_it(client):
     images = solved_faces()
-    images[0] = base64_face("RUUUUUUUU")  # one wrong sticker on U
+    images[0] = base64_frame("RUUUUUUUU", coverage=0.6)  # one wrong sticker on U
     response = client.post("/api/webcam-scan", json={"images": images})
 
     assert response.status_code == 422
@@ -176,7 +176,7 @@ def test_two_frames_of_the_same_face_are_named(client):
     # white, used to surface as "Face U appears 18 times" after all six captures,
     # which points at no frame in particular.
     images = solved_faces()
-    images[3] = base64_face("U" * 9)  # frame 4 should be the yellow face
+    images[3] = base64_frame("U" * 9, coverage=0.6)  # frame 4 should be the yellow face
     response = client.post("/api/webcam-scan", json={"images": images})
 
     assert response.status_code == 422
