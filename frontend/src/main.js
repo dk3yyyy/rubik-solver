@@ -503,6 +503,7 @@ class App {
 
   async scramble() {
     this.setStatus('Generating scramble...', 'loading');
+    this.announce('Generating scramble');
     try {
       const data = await readApiResponse(await fetch(api('/scramble')));
 
@@ -511,14 +512,13 @@ class App {
       this.solution = [];
       this.solvedState = null;
       this.currentMoveIndex = 0;
+      this.manualMoveStack = [];
 
       this.timer.reset();
       this.endInspection();
       this.stopTimerDisplay();
 
       this.history.setScramble(this.scrambleMoves);
-      // The scramble replaces the cube, so a solution for the previous one is no
-      // longer about anything on screen.
       this.history.setSolution([]);
       this.updateHistoryDisplay();
 
@@ -530,8 +530,10 @@ class App {
 
       this.moveCounterEl.textContent = `Scrambled: ${this.scrambleMoves.length} moves`;
       this.setStatus('Scrambled! Click "Solve" to find a solution.', 'success');
+      this.announce(`Scramble complete. ${this.scrambleMoves.length} moves applied.`);
     } catch (err) {
       this.setStatus(this.apiError(err), 'error');
+      this.announce(`Error: ${this.apiError(err)}`);
     }
   }
 
@@ -569,6 +571,7 @@ class App {
 
     if (state && !state.complete) {
       this.setStatus(`Your cube is not finished: ${state.problems}.`, 'error');
+      this.announce(`Cube incomplete: ${state.problems}`);
       return;
     }
 
@@ -578,10 +581,12 @@ class App {
 
     if (!facelet || facelet.length !== STICKER_TOTAL) {
       this.setStatus('Fill in all 54 stickers, or paste a facelet string', 'error');
+      this.announce('Invalid facelet string');
       return;
     }
 
     this.setStatus('Solving...', 'loading');
+    this.announce('Solving cube');
     try {
       const data = await readApiResponse(await fetch(api('/solve'), {
         method: 'POST',
@@ -599,16 +604,15 @@ class App {
 
       this.showPrediction(data.move_count, this.solution.length === 0);
       this.updatePlaybackDisplay();
-      this.setStatus(
-        this.solution.length
-          ? `Your cube needs ${data.move_count} moves. `
-            + 'Set the speed, then press Play to follow along, or use Next to step through.'
-          : 'That cube is already solved, so no moves are needed.',
-        'success',
-      );
+      const msg = this.solution.length
+        ? `Your cube needs ${data.move_count} moves. Set the speed, then press Play to follow along, or use Next to step through.`
+        : 'That cube is already solved, so no moves are needed.';
+      this.setStatus(msg, 'success');
+      this.announce(msg);
     } catch (err) {
       this.clearPrediction();
       this.setStatus(this.apiError(err), 'error');
+      this.announce(`Error: ${this.apiError(err)}`);
     }
   }
 
@@ -739,18 +743,16 @@ class App {
 
   async play() {
     if (this.isPlaying || this.currentMoveIndex >= this.solution.length) return;
-    // A queued prediction would otherwise reset the solution mid-playback.
     clearTimeout(this.predictionTimer);
     this.isPlaying = true;
     this.timer.start();
     this.startTimerDisplay();
+    this.announce('Playing solution');
 
-    // Checking isPlaying each step is what lets Pause stop playback instead of
-    // letting the whole solution play out.
     while (this.isPlaying && this.currentMoveIndex < this.solution.length) {
       const move = this.solution[this.currentMoveIndex];
       this.currentMoveIndex += 1;
-      await this.cube.enqueue(move, true);
+      await this.cube.enqueue(move, !this.reducedMotion);
       this.updatePlaybackDisplay();
     }
 
@@ -760,6 +762,7 @@ class App {
       this.stopTimerDisplay();
       this.verifyRenderedState();
       this.saveTime();
+      this.announce('Solution complete');
     }
   }
 
@@ -783,15 +786,20 @@ class App {
     this.isPlaying = false;
     this.timer.stop();
     this.stopTimerDisplay();
+    this.announce('Playback paused');
   }
 
   async next() {
     if (this.currentMoveIndex < this.solution.length) {
       const move = this.solution[this.currentMoveIndex];
       this.currentMoveIndex += 1;
-      await this.cube.enqueue(move, true);
+      await this.cube.enqueue(move, !this.reducedMotion);
       this.updatePlaybackDisplay();
-      if (this.currentMoveIndex === this.solution.length) this.verifyRenderedState();
+      this.announce(`Move ${this.currentMoveIndex} of ${this.solution.length}: ${move}`);
+      if (this.currentMoveIndex === this.solution.length) {
+        this.verifyRenderedState();
+        this.announce('Solution complete');
+      }
     }
   }
 
@@ -799,8 +807,9 @@ class App {
     if (this.currentMoveIndex > 0) {
       const move = this.solution[this.currentMoveIndex - 1];
       this.currentMoveIndex -= 1;
-      await this.cube.enqueue(invertMove(move), true);
+      await this.cube.enqueue(invertMove(move), !this.reducedMotion);
       this.updatePlaybackDisplay();
+      this.announce(`Back to move ${this.currentMoveIndex} of ${this.solution.length}`);
     }
   }
 
@@ -824,6 +833,7 @@ class App {
     this.updatePlaybackDisplay();
     if (this.cubeInput) this.cubeInput.clear();
     this.setStatus('Reset to solved state', 'info');
+    this.announce('Cube reset to solved state');
   }
 
   async loadFacelet() {
