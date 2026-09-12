@@ -8,96 +8,106 @@
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
+  <!-- Skip link for keyboard users -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <!-- ARIA live region for status announcements -->
+  <div id="aria-live" class="sr-only" aria-live="polite" aria-atomic="true" role="status"></div>
+
   <div id="app">
     <header class="site-header content-width">
       <div class="logo">
         <span class="logo-mark" aria-hidden="true"><span>RC</span></span>
         <span class="logo-text">rubik<span class="logo-period">.</span></span>
       </div>
-      <nav class="primary-nav">
+      <nav class="primary-nav" aria-label="Main navigation">
         <a href="#solver">Solver</a>
         <a href="#how-it-works">How it works</a>
+        <button id="cb-toggle" class="cb-toggle" aria-label="Toggle colorblind-friendly palette" aria-pressed="false" type="button">👁</button>
       </nav>
     </header>
 
-    <main>
-      <section id="solver" class="solver-section content-width">
+    <main id="main-content">
+      <section id="solver" class="solver-section content-width" aria-label="Cube solver">
         <div class="cube-container">
-          <div id="cube-canvas"></div>
+          <div id="cube-canvas" role="img" aria-label="3D Rubik's Cube visualization. Use arrow keys to rotate the camera."></div>
           <div class="cube-overlay">
-            <div id="move-counter" class="move-counter">0 moves</div>
+            <div id="move-counter" class="move-counter" aria-hidden="true">0 moves</div>
           </div>
         </div>
 
-        <div class="controls">
+        <div class="controls" role="group" aria-label="Cube controls">
           <div class="timer-display">
-            <div id="timer" class="timer-time">00:00.00</div>
+            <div id="timer" class="timer-time" role="timer" aria-label="Solve timer">00:00.00</div>
           </div>
 
           <div class="best-times-panel">
             <h3>Best Times</h3>
             <div id="best-times" class="best-times-list"></div>
-            <button id="btn-clear-times" class="btn btn-small">Clear</button>
+            <button id="btn-clear-times" class="btn btn-small" type="button">Clear</button>
           </div>
 
           <div class="control-row">
-            <button id="btn-scramble" class="btn btn-primary">Scramble</button>
-            <button id="btn-solve" class="btn btn-dark">Solve</button>
-            <button id="btn-reset" class="btn btn-ghost">Reset</button>
+            <button id="btn-scramble" class="btn btn-primary" type="button">Scramble</button>
+            <button id="btn-solve" class="btn btn-dark" type="button">Solve</button>
+            <button id="btn-reset" class="btn btn-ghost" type="button">Reset</button>
           </div>
 
           <div class="control-row playback-controls">
-            <button id="btn-play" class="btn btn-small">Play</button>
-            <button id="btn-pause" class="btn btn-small">Pause</button>
-            <button id="btn-next" class="btn btn-small">Next</button>
-            <button id="btn-prev" class="btn btn-small">Prev</button>
+            <button id="btn-play" class="btn btn-small" type="button" aria-label="Play solution">Play</button>
+            <button id="btn-pause" class="btn btn-small" type="button" aria-label="Pause playback">Pause</button>
+            <button id="btn-next" class="btn btn-small" type="button" aria-label="Next move">Next</button>
+            <button id="btn-prev" class="btn btn-small" type="button" aria-label="Previous move">Prev</button>
+            <label for="speed-slider" class="sr-only">Playback speed</label>
             <input type="range" id="speed-slider" min="100" max="3000" step="50" value="600" class="speed-slider" aria-label="Playback speed" />
             <span id="speed-label" class="speed-label">0.60s per move</span>
           </div>
 
           <div class="control-row">
-            <input type="text" id="facelet-input" class="text-input" placeholder="Paste 54-char facelet string..." maxlength="54" />
-            <button id="btn-load" class="btn btn-small">Load</button>
+            <label for="facelet-input" class="sr-only">Facelet string input</label>
+            <input type="text" id="facelet-input" class="text-input" placeholder="Paste 54-char facelet string..." maxlength="54" aria-describedby="facelet-help" />
+            <button id="btn-load" class="btn btn-small" type="button">Load</button>
           </div>
+          <span id="facelet-help" class="sr-only">Enter a 54-character facelet string representing your cube state, then press Load.</span>
 
           <div class="control-row">
-            <button id="btn-webcam" class="btn btn-ghost">Scan with webcam</button>
+            <button id="btn-webcam" class="btn btn-ghost" type="button">Scan with webcam</button>
           </div>
 
-          <div id="webcam-panel" class="webcam-panel" hidden>
-            <video id="webcam-video" autoplay playsinline></video>
+          <div id="webcam-panel" class="webcam-panel" hidden role="dialog" aria-label="Webcam cube scanner">
+            <video id="webcam-video" autoplay playsinline aria-label="Camera feed"></video>
             <div class="webcam-buttons">
-              <button id="webcam-capture" class="btn btn-primary">Capture</button>
-              <button id="webcam-close" class="btn btn-ghost">Close</button>
+              <button id="webcam-capture" class="btn btn-primary" type="button">Capture</button>
+              <button id="webcam-close" class="btn btn-ghost" type="button">Close</button>
             </div>
             <p id="webcam-hint" class="webcam-hint">Point the camera at one face and capture all six, in order U, R, F, D, L, B.</p>
           </div>
 
-          <div class="history-panel">
+          <div class="history-panel" role="region" aria-label="Move history">
             <h3>Move History</h3>
             <div class="history-sections">
               <div class="history-section">
-                <label>Scramble</label>
-                <div id="history-scramble" class="history-moves"></div>
+                <label id="scramble-label">Scramble</label>
+                <div id="history-scramble" class="history-moves" role="list" aria-labelledby="scramble-label"></div>
               </div>
               <div class="history-section">
-                <label>Solution</label>
-                <div id="history-solution" class="history-moves"></div>
+                <label id="solution-label">Solution</label>
+                <div id="history-solution" class="history-moves" role="list" aria-labelledby="solution-label" aria-live="polite"></div>
               </div>
             </div>
             <div class="history-actions">
-              <button id="btn-copy" class="btn btn-small">Copy</button>
-              <button id="btn-invert" class="btn btn-small">Invert</button>
-              <button id="btn-optimize" class="btn btn-small">Optimize</button>
-              <button id="btn-clear-history" class="btn btn-small">Clear</button>
+              <button id="btn-copy" class="btn btn-small" type="button">Copy</button>
+              <button id="btn-invert" class="btn btn-small" type="button">Invert</button>
+              <button id="btn-optimize" class="btn btn-small" type="button">Optimize</button>
+              <button id="btn-clear-history" class="btn btn-small" type="button">Clear</button>
             </div>
           </div>
 
-          <div id="status" class="status"></div>
+          <div id="status" class="status" role="alert" aria-live="assertive"></div>
         </div>
       </section>
 
-      <section id="cube-input" class="cube-input-section content-width">
+      <section id="cube-input" class="cube-input-section content-width" aria-label="Cube input">
         <h2>Enter your cube</h2>
         <p class="cube-input-hint">
           Hold the cube with <strong>white on top</strong> and <strong>green facing you</strong>.
@@ -105,15 +115,15 @@
           because they define which colour is on which side.
         </p>
         <div class="cube-input-body">
-          <div id="cube-net" class="cube-net"></div>
+          <div id="cube-net" class="cube-net" role="group" aria-label="Cube face net"></div>
           <div class="cube-input-side">
-            <div id="cube-palette" class="palette"></div>
-            <div id="cube-input-status" class="input-status">48 stickers left to fill</div>
+            <div id="cube-palette" class="palette" role="toolbar" aria-label="Colour palette"></div>
+            <div id="cube-input-status" class="input-status" role="status" aria-live="polite">48 stickers left to fill</div>
             <div class="input-actions">
-              <button id="btn-input-solve" class="btn btn-dark">Predict moves</button>
-              <button id="btn-input-clear" class="btn btn-ghost">Clear</button>
+              <button id="btn-input-solve" class="btn btn-dark" type="button">Predict moves</button>
+              <button id="btn-input-clear" class="btn btn-ghost" type="button">Clear</button>
             </div>
-            <div id="move-prediction" class="move-prediction" hidden></div>
+            <div id="move-prediction" class="move-prediction" hidden role="status" aria-live="polite"></div>
           </div>
         </div>
       </section>
@@ -122,6 +132,7 @@
         <h2>How it works</h2>
         <p>This solver uses Herbert Kociemba's two-phase algorithm. Solutions are short but not always the shortest possible; they stay within 22 moves. The cube state is represented as a 54-character facelet string, nine stickers per face, ordered U, R, F, D, L, B.</p>
         <p>Type moves directly (U, U', D, D', L, L', R, R', F, F', B, B') or use the controls above. The 3D cube responds to mouse drag for camera rotation.</p>
+        <p><strong>Keyboard shortcuts:</strong> Press <kbd>S</kbd> to scramble, <kbd>Enter</kbd> to solve, <kbd>Space</kbd> to play/pause, arrow keys to step through the solution, and letter keys (U, D, L, R, F, B) to turn layers. Lowercase letters apply prime (counter-clockwise) moves.</p>
       </section>
     </main>
 

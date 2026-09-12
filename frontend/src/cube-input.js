@@ -166,6 +166,7 @@ export class CubeInput {
   }
 
   refresh() {
+    const cbMode = document.documentElement.classList.contains('cb-mode');
     for (const swatch of this.paletteEl.querySelectorAll('.swatch')) {
       swatch.classList.toggle('is-active', swatch.dataset.face === this.brush);
     }
@@ -177,10 +178,19 @@ export class CubeInput {
       cell.classList.toggle('is-empty', !colours);
       cell.classList.toggle('is-centre', offset === CENTRE);
       cell.style.background = colours ? colours.hex : '';
+      // Colorblind mode: add pattern overlay class and letter indicator
+      cell.className = cell.className.replace(/cb-pattern-\w/g, '');
+      if (cbMode && colours) {
+        cell.classList.add(`cb-pattern-${sticker}`);
+        cell.dataset.cbLetter = sticker;
+      } else {
+        delete cell.dataset.cbLetter;
+      }
       const position = offset + 1;
+      const cbSuffix = cbMode && colours ? ` (${sticker})` : '';
       cell.setAttribute(
         'aria-label',
-        `${FACE_LABEL[face]} sticker ${position}, ${colours ? colours.name : 'empty'}`,
+        `${FACE_LABEL[face]} sticker ${position}, ${colours ? colours.name : 'empty'}${cbSuffix}`,
       );
       cell.title = colours ? colours.name : 'empty';
     }

@@ -248,6 +248,19 @@ export const FACE_COLOURS = {
   B: { letter: 'B', name: 'blue', hex: '#0046ad' },
 };
 
+/**
+ * Colorblind-friendly palette (Okabe-Ito colors).
+ * High-contrast colors distinguishable by most forms of color vision deficiency.
+ */
+export const CB_FACE_COLOURS = {
+  U: { letter: 'U', name: 'white', hex: '#ffffff' },
+  R: { letter: 'R', name: 'vermillion', hex: '#d55e00' },
+  F: { letter: 'F', name: 'bluish green', hex: '#009e73' },
+  D: { letter: 'D', name: 'yellow', hex: '#f0e442' },
+  L: { letter: 'L', name: 'reddish purple', hex: '#cc79a7' },
+  B: { letter: 'B', name: 'blue', hex: '#0072b2' },
+};
+
 export const STICKER_COUNT = 54;
 export const STICKERS_PER_FACE = 9;
 

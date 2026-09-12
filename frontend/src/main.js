@@ -22,13 +22,21 @@ const COLORS = Object.fromEntries(
 );
 COLORS.interior = 0x1a1a1a;
 
+// Colorblind-friendly palette (Okabe-Ito colors)
+const CB_COLORS = {
+  U: 0xffffff,
+  R: 0xd55e00,
+  F: 0x009e73,
+  D: 0xf0e442,
+  L: 0xcc79a7,
+  B: 0x0072b2,
+  interior: 0x1a1a1a,
+};
+
 const SOLVED_FACELET = 'UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB';
 const FACE_COUNT = 6;
 const STICKER_TOTAL = 54;
 
-// Requests go to the same origin by default, which the Vite dev server proxies
-// to the backend (see vite.config.js). Set VITE_API_URL to point elsewhere,
-// e.g. when serving the built frontend from the backend host.
 const API_BASE = ((import.meta.env && import.meta.env.VITE_API_URL) || '').replace(/\/+$/, '');
 const api = (path) => `${API_BASE}/api${path}`;
 
@@ -63,7 +71,6 @@ class Cube3D {
     this.controls.minDistance = 4;
     this.controls.maxDistance = 15;
 
-    // Lighting
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
     const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.3);
     hemi.position.set(0, 10, 0);
@@ -80,7 +87,6 @@ class Cube3D {
     fill.position.set(-5, 5, -5);
     this.scene.add(fill);
 
-    // Floor
     const floorGeo = new THREE.PlaneGeometry(20, 20);
     const floorMat = new THREE.ShadowMaterial({ opacity: 0.15 });
     const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -137,7 +143,6 @@ class Cube3D {
     return this.cubies.find(c => c.userData.gridPos.x === x && c.userData.gridPos.y === y && c.userData.gridPos.z === z);
   }
 
-  /** The sticker on `cubie` whose outward normal points along `direction`. */
   stickerFacing(cubie, direction) {
     const target = new THREE.Vector3(direction[0], direction[1], direction[2]);
     let best = null;
@@ -162,13 +167,6 @@ class Cube3D {
     return '?';
   }
 
-  /**
-   * Paint the cube so it shows `facelet`.
-   *
-   * Stickers are matched by the direction they currently face, not by the
-   * label they were created with, so this is correct however the cubies have
-   * been turned.
-   */
   updateStickers(facelet) {
     if (!facelet || facelet.length !== 54) return;
     let index = 0;
@@ -185,7 +183,6 @@ class Cube3D {
     }
   }
 
-  /** Read the facelet string the rendered cube currently shows. */
   readFacelet() {
     const letters = [];
     for (const face of FACES) {
@@ -202,7 +199,6 @@ class Cube3D {
     this.moveDuration = Math.max(0, ms);
   }
 
-  /** Queue a move so overlapping key presses cannot corrupt the cube. */
   enqueue(move, animate = true) {
     this.queue = this.queue.then(() => this.applyMove(move, animate));
     return this.queue;
@@ -223,12 +219,6 @@ class Cube3D {
     return this.animateMove(cubies, axis, rotation.angle);
   }
 
-  /**
-   * Rotate a layer about the cube's centre.
-   *
-   * rotateOnWorldAxis only spins an object in place, so the position has to be
-   * rotated too; without that the cubies never actually orbit the cube.
-   */
   rotateCubies(cubies, axis, angle) {
     const rotation = new THREE.Quaternion().setFromAxisAngle(axis, angle);
     for (const cubie of cubies) {
@@ -262,7 +252,6 @@ class Cube3D {
     });
   }
 
-  /** Snap a rotated layer back onto the integer grid. */
   settle(cubies) {
     for (const cubie of cubies) {
       cubie.position.set(
@@ -279,7 +268,6 @@ class Cube3D {
     }
   }
 
-  /** Remove floating point drift by rounding the rotation matrix to -1/0/1. */
   snapRotation(cubie) {
     const matrix = new THREE.Matrix4().makeRotationFromQuaternion(cubie.quaternion);
     const elements = matrix.elements;
@@ -402,6 +390,10 @@ class App {
     this.predictionTimer = null;
     this.lastMirrored = null;
     this.solvedInputFacelet = null;
+    this.ariaLive = document.getElementById('aria-live');
+    this.cbToggle = document.getElementById('cb-toggle');
+    this.colorblindMode = false;
+    this.reducedMotion = false;
 
     this.init();
   }
@@ -420,6 +412,86 @@ class App {
     this.updateBestTimesDisplay();
     this.updateInputStatus(this.cubeInput.getState());
     this.setStatus('Fill in your cube below, or press Scramble to try a random one.', 'info');
+    this.initAccessibility();
+  }
+
+  initAccessibility() {
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this.reducedMotion = motionQuery.matches;
+    if (this.reducedMotion) {
+      this.cube.setMoveDuration(0);
+      this.speedSlider.value = 0;
+      this.speedSlider.disabled = true;
+      this.updateSpeedLabel();
+    }
+    motionQuery.addEventListener('change', (e) => {
+      this.reducedMotion = e.matches;
+      if (this.reducedMotion) {
+        this.cube.setMoveDuration(0);
+        this.speedSlider.value = 0;
+        this.speedSlider.disabled = true;
+      } else {
+        this.speedSlider.disabled = false;
+        this.speedSlider.value = 600;
+        this.cube.setMoveDuration(600);
+      }
+      this.updateSpeedLabel();
+      this.announce(this.reducedMotion ? 'Reduced motion enabled' : 'Reduced motion disabled');
+    });
+    if (this.cbToggle) {
+      this.cbToggle.addEventListener('click', () => this.toggleColorblindMode());
+    }
+    if (localStorage.getItem('rubik-cb-mode') === 'true') {
+      this.enableColorblindMode(false);
+    }
+  }
+
+  toggleColorblindMode() {
+    if (this.colorblindMode) {
+      this.disableColorblindMode();
+    } else {
+      this.enableColorblindMode(true);
+    }
+  }
+
+  enableColorblindMode(announceChange) {
+    this.colorblindMode = true;
+    document.documentElement.classList.add('cb-mode');
+    for (const [face, color] of Object.entries(CB_COLORS)) {
+      COLORS[face] = color;
+    }
+    this.cube.updateStickers(this.currentFacelet);
+    if (this.cbToggle) {
+      this.cbToggle.setAttribute('aria-pressed', 'true');
+    }
+    localStorage.setItem('rubik-cb-mode', 'true');
+    if (announceChange) {
+      this.announce('Colorblind-friendly palette enabled');
+      this.setStatus('Colorblind-friendly palette enabled. High-contrast colors and patterns applied.', 'success');
+    }
+  }
+
+  disableColorblindMode() {
+    this.colorblindMode = false;
+    document.documentElement.classList.remove('cb-mode');
+    for (const [face, { hex }] of Object.entries(FACE_COLOURS)) {
+      COLORS[face] = parseInt(hex.slice(1), 16);
+    }
+    this.cube.updateStickers(this.currentFacelet);
+    if (this.cbToggle) {
+      this.cbToggle.setAttribute('aria-pressed', 'false');
+    }
+    localStorage.setItem('rubik-cb-mode', 'false');
+    this.announce('Colorblind-friendly palette disabled');
+    this.setStatus('Standard palette restored.', 'info');
+  }
+
+  announce(message) {
+    if (!this.ariaLive) return;
+    this.ariaLive.textContent = '';
+    requestAnimationFrame(() => {
+      this.ariaLive.textContent = message;
+    });
   }
 
   bindEvents() {
@@ -447,8 +519,8 @@ class App {
     });
 
     document.addEventListener('keydown', (e) => {
-      if (document.activeElement.tagName === 'INPUT') return;
-      // Arrow keys step through the solution one move at a time.
+      const tag = document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (e.key === 'ArrowRight') {
         e.preventDefault();
         this.next();
@@ -464,18 +536,38 @@ class App {
         this.solve();
         return;
       }
-      if (e.key === 's' || e.key === 'S') {
+      if (e.key === ' ') {
         e.preventDefault();
-        this.scramble();
+        if (this.isPlaying) this.pause();
+        else this.play();
         return;
       }
-      const map = { 'u': "U'", 'U': 'U', 'd': "D'", 'D': 'D', 'l': "L'", 'L': 'L', 'r': "R'", 'R': 'R', 'f': "F'", 'F': 'F', 'b': "B'", 'B': 'B' };
+      if (e.key === 's' || e.key === 'S') {
+        if (!e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          this.scramble();
+        }
+        return;
+      }
+      if (e.key === 'r' || e.key === 'R') {
+        if (!e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          this.reset();
+        }
+        return;
+      }
+      const map = {
+        'u': "U'", 'U': 'U', 'd': "D'", 'D': 'D',
+        'l': "L'", 'L': 'L', 'r': "R'", 'R': 'R',
+        'f': "F'", 'F': 'F', 'b': "B'", 'B': 'B'
+      };
       if (map[e.key]) {
         e.preventDefault();
         this.ensureTimerRunning();
-        this.cube.enqueue(map[e.key], true);
+        this.cube.enqueue(map[e.key], !this.reducedMotion);
         this.history.addMove(map[e.key]);
         this.updateHistoryDisplay();
+        this.announce(`Move ${map[e.key]}`);
       }
     });
 
@@ -487,6 +579,7 @@ class App {
 
   async scramble() {
     this.setStatus('Generating scramble...', 'loading');
+    this.announce('Generating scramble');
     try {
       const data = await readApiResponse(await fetch(api('/scramble')));
 
@@ -500,8 +593,6 @@ class App {
       this.startTimerDisplay();
 
       this.history.setScramble(this.scrambleMoves);
-      // The scramble replaces the cube, so a solution for the previous one is no
-      // longer about anything on screen.
       this.history.setSolution([]);
       this.updateHistoryDisplay();
 
@@ -513,16 +604,13 @@ class App {
 
       this.moveCounterEl.textContent = `Scrambled: ${this.scrambleMoves.length} moves`;
       this.setStatus('Scrambled! Click "Solve" to find a solution.', 'success');
+      this.announce(`Scramble complete. ${this.scrambleMoves.length} moves applied.`);
     } catch (err) {
       this.setStatus(this.apiError(err), 'error');
+      this.announce(`Error: ${this.apiError(err)}`);
     }
   }
 
-  /**
-   * Start the timer on first user input — not during scramble animation.
-   * The timer should measure how long the user takes to solve, not how
-   * long the scramble animation plays out.
-   */
   ensureTimerRunning() {
     if (!this.timer.running && this.timer.elapsed === 0) {
       this.timer.start();
@@ -535,6 +623,7 @@ class App {
 
     if (state && !state.complete) {
       this.setStatus(`Your cube is not finished: ${state.problems}.`, 'error');
+      this.announce(`Cube incomplete: ${state.problems}`);
       return;
     }
 
@@ -544,10 +633,12 @@ class App {
 
     if (!facelet || facelet.length !== STICKER_TOTAL) {
       this.setStatus('Fill in all 54 stickers, or paste a facelet string', 'error');
+      this.announce('Invalid facelet string');
       return;
     }
 
     this.setStatus('Solving...', 'loading');
+    this.announce('Solving cube');
     try {
       const data = await readApiResponse(await fetch(api('/solve'), {
         method: 'POST',
@@ -565,20 +656,18 @@ class App {
 
       this.showPrediction(data.move_count, this.solution.length === 0);
       this.updatePlaybackDisplay();
-      this.setStatus(
-        this.solution.length
-          ? `Your cube needs ${data.move_count} moves. `
-            + 'Set the speed, then press Play to follow along, or use Next to step through.'
-          : 'That cube is already solved, so no moves are needed.',
-        'success',
-      );
+      const msg = this.solution.length
+        ? `Your cube needs ${data.move_count} moves. Set the speed, then press Play to follow along, or use Next to step through.`
+        : 'That cube is already solved, so no moves are needed.';
+      this.setStatus(msg, 'success');
+      this.announce(msg);
     } catch (err) {
       this.clearPrediction();
       this.setStatus(this.apiError(err), 'error');
+      this.announce(`Error: ${this.apiError(err)}`);
     }
   }
 
-  /** Show the predicted move count for the cube the user entered. */
   showPrediction(count, alreadySolved) {
     if (!this.predictionEl) return;
     this.predictionEl.hidden = false;
@@ -606,7 +695,6 @@ class App {
     this.predictionEl.textContent = '';
   }
 
-  /** React to a sticker being painted or cleared. */
   onInputChange(state, meta = {}) {
     if (meta.lockedCentre) {
       this.setStatus(
@@ -614,12 +702,9 @@ class App {
         + 'Hold the cube with white on top and green facing you so the centres line up.',
         'info',
       );
+      this.announce(`Centre ${FACE_COLOURS[meta.lockedCentre].name} is locked`);
     }
 
-    // Any edit invalidates a solution computed for the previous entry. Testing
-    // the solution rather than the recorded facelet matters: loadFacelet and the
-    // scan clear that record before setting the new cube, and a solution left
-    // over from the previous cube could still be played against the new one.
     if (this.solution.length && state.facelet !== this.solvedInputFacelet) {
       this.solution = [];
       this.solvedState = null;
@@ -633,7 +718,6 @@ class App {
 
     if (!this.isPlaying) {
       const painted = state.stickers.filter(Boolean).length;
-      // With nothing entered yet, rest on the solved cube rather than a dark one.
       this.cube.updateStickers(painted <= FACE_COUNT ? SOLVED_FACELET : state.facelet);
     }
 
@@ -644,7 +728,6 @@ class App {
     else this.clearPrediction();
   }
 
-  /** Keep the paste field in step with the picker without clobbering typing. */
   syncFaceletInput(state) {
     if (state.complete) {
       this.faceletInput.value = state.facelet;
@@ -668,7 +751,6 @@ class App {
     }
   }
 
-  /** Wait a moment so a burst of taps does not fire a request each. */
   schedulePrediction() {
     clearTimeout(this.predictionTimer);
     this.predictionTimer = setTimeout(() => this.solve(), 250);
@@ -689,6 +771,7 @@ class App {
     this.updatePlaybackDisplay();
     this.cubeInput.clear();
     this.setStatus('Cleared. Enter your cube again.', 'info');
+    this.announce('Cube input cleared');
   }
 
   updateSpeedLabel() {
@@ -697,7 +780,6 @@ class App {
     this.speedLabelEl.textContent = `${(ms / 1000).toFixed(2)}s per move`;
   }
 
-  /** Turn a failed request into something the user can act on. */
   apiError(err) {
     const origin = typeof window !== 'undefined' ? window.location.origin : null;
     return describeApiError(err, API_BASE || null, origin);
@@ -705,18 +787,16 @@ class App {
 
   async play() {
     if (this.isPlaying || this.currentMoveIndex >= this.solution.length) return;
-    // A queued prediction would otherwise reset the solution mid-playback.
     clearTimeout(this.predictionTimer);
     this.isPlaying = true;
     this.timer.start();
     this.startTimerDisplay();
+    this.announce('Playing solution');
 
-    // Checking isPlaying each step is what lets Pause stop playback instead of
-    // letting the whole solution play out.
     while (this.isPlaying && this.currentMoveIndex < this.solution.length) {
       const move = this.solution[this.currentMoveIndex];
       this.currentMoveIndex += 1;
-      await this.cube.enqueue(move, true);
+      await this.cube.enqueue(move, !this.reducedMotion);
       this.updatePlaybackDisplay();
     }
 
@@ -726,14 +806,10 @@ class App {
       this.stopTimerDisplay();
       this.verifyRenderedState();
       this.saveTime();
+      this.announce('Solution complete');
     }
   }
 
-  /**
-   * The cube is painted from the backend facelet, so if the rendered state
-   * drifts from what the server computed, repaint rather than show a wrong
-   * solved cube.
-   */
   verifyRenderedState() {
     if (!this.solvedState) return;
     const rendered = this.cube.readFacelet();
@@ -749,15 +825,20 @@ class App {
     this.isPlaying = false;
     this.timer.stop();
     this.stopTimerDisplay();
+    this.announce('Playback paused');
   }
 
   async next() {
     if (this.currentMoveIndex < this.solution.length) {
       const move = this.solution[this.currentMoveIndex];
       this.currentMoveIndex += 1;
-      await this.cube.enqueue(move, true);
+      await this.cube.enqueue(move, !this.reducedMotion);
       this.updatePlaybackDisplay();
-      if (this.currentMoveIndex === this.solution.length) this.verifyRenderedState();
+      this.announce(`Move ${this.currentMoveIndex} of ${this.solution.length}: ${move}`);
+      if (this.currentMoveIndex === this.solution.length) {
+        this.verifyRenderedState();
+        this.announce('Solution complete');
+      }
     }
   }
 
@@ -765,8 +846,9 @@ class App {
     if (this.currentMoveIndex > 0) {
       const move = this.solution[this.currentMoveIndex - 1];
       this.currentMoveIndex -= 1;
-      await this.cube.enqueue(invertMove(move), true);
+      await this.cube.enqueue(invertMove(move), !this.reducedMotion);
       this.updatePlaybackDisplay();
+      this.announce(`Back to move ${this.currentMoveIndex} of ${this.solution.length}`);
     }
   }
 
@@ -789,6 +871,7 @@ class App {
     this.updatePlaybackDisplay();
     if (this.cubeInput) this.cubeInput.clear();
     this.setStatus('Reset to solved state', 'info');
+    this.announce('Cube reset to solved state');
   }
 
   async loadFacelet() {
@@ -796,17 +879,23 @@ class App {
 
     if (facelet.length !== STICKER_TOTAL) {
       this.setStatus(`Facelet must be ${STICKER_TOTAL} characters`, 'error');
+      this.announce('Invalid facelet string length');
       return;
     }
 
     this.setStatus('Validating...', 'loading');
+    this.announce('Validating facelet');
     try {
       const data = await readApiResponse(await fetch(api('/validate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ state: facelet })
       }));
-      if (!data.valid) { this.setStatus('Invalid: ' + data.error, 'error'); return; }
+      if (!data.valid) {
+        this.setStatus('Invalid: ' + data.error, 'error');
+        this.announce('Invalid facelet: ' + data.error);
+        return;
+      }
 
       this.cube.reset();
       this.cube.updateStickers(facelet);
@@ -815,8 +904,10 @@ class App {
       this.solvedInputFacelet = null;
       this.cubeInput.setFacelet(facelet);
       this.setStatus('Cube loaded. Press Solve to predict the moves.', 'success');
+      this.announce('Cube loaded successfully');
     } catch (err) {
       this.setStatus(this.apiError(err), 'error');
+      this.announce('Error loading facelet');
     }
   }
 
@@ -826,6 +917,7 @@ class App {
     this.capturedFaces = [];
     this.updateWebcamHint();
     panel.hidden = false;
+    this.announce('Webcam scanner opened');
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -833,6 +925,7 @@ class App {
       this.currentStream = stream;
     } catch (err) {
       this.setStatus('Camera: ' + err.message, 'error');
+      this.announce('Camera error: ' + err.message);
       panel.hidden = true;
     }
   }
@@ -847,6 +940,7 @@ class App {
     canvas.getContext('2d').drawImage(video, 0, 0);
     this.capturedFaces.push(canvas.toDataURL('image/jpeg', 0.9));
     this.updateWebcamHint();
+    this.announce(`Face ${this.capturedFaces.length} of ${FACE_COUNT} captured`);
 
     if (this.capturedFaces.length === FACE_COUNT) await this.scanCapturedFaces();
     else this.setStatus(`Captured face ${this.capturedFaces.length}/${FACE_COUNT}`, 'info');
@@ -862,6 +956,7 @@ class App {
 
   async scanCapturedFaces() {
     this.setStatus('Scanning cube...', 'loading');
+    this.announce('Scanning cube from images');
     try {
       const data = await readApiResponse(await fetch(api('/webcam-scan'), {
         method: 'POST',
@@ -876,15 +971,14 @@ class App {
       this.solvedInputFacelet = null;
       this.cubeInput.setFacelet(data.state);
       this.moveCounterEl.textContent = 'Scanned cube';
-      this.setStatus(
-        `Scanned cube (confidence ${Math.round(data.confidence * 100)}%). `
-        + 'Check the grid below and fix any wrong stickers before solving.',
-        'success',
-      );
+      const scanMsg = `Scanned cube (confidence ${Math.round(data.confidence * 100)}%). Check the grid below and fix any wrong stickers before solving.`;
+      this.setStatus(scanMsg, 'success');
+      this.announce(`Cube scanned with ${Math.round(data.confidence * 100)}% confidence`);
       this.capturedFaces = [];
       this.closeWebcam();
     } catch (err) {
       this.setStatus('Scan failed: ' + this.apiError(err), 'error');
+      this.announce('Scan failed');
       this.capturedFaces = [];
       this.updateWebcamHint();
     }
@@ -899,17 +993,13 @@ class App {
     }
     video.srcObject = null;
     panel.hidden = true;
+    this.announce('Webcam scanner closed');
   }
 
-  /** One-shot render, used when the clock is not running. */
   renderTimer() {
     this.timerDisplay.textContent = this.timer.formatTime(this.timer.getElapsed());
   }
 
-  /**
-   * Tick the clock while it runs. The timer object only tracks elapsed time;
-   * without this the display would freeze as soon as the clock started.
-   */
   startTimerDisplay() {
     if (this.timerInterval) return;
     this.renderTimer();
@@ -924,11 +1014,6 @@ class App {
     this.renderTimer();
   }
 
-  /**
-   * The solution is a list of moves and, during playback, one of them is the move
-   * you are on. Rendering it as an undifferentiated string left people counting
-   * tokens in a 20 move sequence to work out what to turn next.
-   */
   renderMoves(container, moves) {
     container.innerHTML = '';
     moves.forEach((move, index) => {
@@ -936,11 +1021,11 @@ class App {
       chip.className = 'move-chip';
       chip.dataset.index = String(index);
       chip.textContent = move;
+      chip.setAttribute('role', 'listitem');
       container.appendChild(chip);
     });
   }
 
-  /** Mark the move the person should be turning: done behind, next ahead. */
   markCurrentMove() {
     if (!this.solutionDisplay) return;
     for (const chip of this.solutionDisplay.querySelectorAll('.move-chip')) {
@@ -948,13 +1033,10 @@ class App {
       const state = movePlaybackState(index, this.currentMoveIndex);
       chip.classList.toggle('is-done', state === 'done');
       chip.classList.toggle('is-current', state === 'current');
+      chip.setAttribute('aria-current', state === 'current' ? 'true' : 'false');
     }
   }
 
-  /**
-   * The counter and the mark on the solution, both from the one cursor, so they
-   * can never disagree about which move you are on.
-   */
   updatePlaybackDisplay() {
     this.moveCounterEl.textContent = playbackCounterText(
       this.currentMoveIndex,
@@ -972,32 +1054,49 @@ class App {
   copyHistory() {
     const text = `Scramble: ${this.history.format(this.history.scramble)}\nSolution: ${this.history.format(this.history.solution)}`;
     navigator.clipboard.writeText(text)
-      .then(() => this.setStatus('Copied!', 'success'))
-      .catch(() => this.setStatus('Copy failed', 'error'));
+      .then(() => {
+        this.setStatus('Copied!', 'success');
+        this.announce('Move history copied to clipboard');
+      })
+      .catch(() => {
+        this.setStatus('Copy failed', 'error');
+        this.announce('Copy to clipboard failed');
+      });
   }
 
   invertScramble() {
-    if (this.history.scramble.length === 0) { this.setStatus('No scramble', 'error'); return; }
+    if (this.history.scramble.length === 0) {
+      this.setStatus('No scramble', 'error');
+      this.announce('No scramble to invert');
+      return;
+    }
     const inverted = this.history.scramble.slice().reverse().map(invertMove);
     this.cube.playSolution(inverted);
     this.history.setScramble(inverted);
     this.updateHistoryDisplay();
     this.setStatus('Inverted', 'success');
+    this.announce('Scramble inverted');
   }
 
   optimizeSolution() {
-    if (this.history.solution.length === 0) { this.setStatus('No solution', 'error'); return; }
+    if (this.history.solution.length === 0) {
+      this.setStatus('No solution', 'error');
+      this.announce('No solution to optimize');
+      return;
+    }
     const before = this.history.solution.length;
     const optimized = optimizeMoves(this.history.solution);
     this.history.setSolution(optimized);
     this.updateHistoryDisplay();
     this.setStatus(`Optimized: ${before} to ${optimized.length} moves`, 'success');
+    this.announce(`Solution optimized from ${before} to ${optimized.length} moves`);
   }
 
   clearHistory() {
     this.history.clear();
     this.updateHistoryDisplay();
     this.setStatus('Cleared', 'info');
+    this.announce('Move history cleared');
   }
 
   saveTime() {
@@ -1025,6 +1124,7 @@ class App {
     localStorage.removeItem('rubik-best-times');
     this.updateBestTimesDisplay();
     this.setStatus('Times cleared', 'info');
+    this.announce('Best times cleared');
   }
 
   setStatus(message, type = 'info') {

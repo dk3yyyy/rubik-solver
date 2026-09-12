@@ -13,6 +13,7 @@
   --orange: #f45e38;
   --ink-hover: #42433d;
   --link-hover: #cc4826;
+  --focus-ring: rgba(244, 94, 56, 0.4);
   --font-sans: 'DM Sans', sans-serif;
   --font-mono: 'DM Mono', monospace;
   --content-width: min(1200px, calc(100vw - 48px));
@@ -26,6 +27,121 @@ body {
   background: var(--paper);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Accessibility: focus styles for keyboard navigation */
+:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 2px;
+}
+
+/* Screen-reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link for keyboard users */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 16px;
+  z-index: 1000;
+  padding: 8px 16px;
+  background: var(--orange);
+  color: #fff;
+  font-weight: 600;
+  border-radius: 0 0 7px 7px;
+  text-decoration: none;
+  transition: top 0.2s;
+}
+
+.skip-link:focus {
+  top: 0;
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Colorblind mode toggle button */
+.cb-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 18px;
+}
+.cb-toggle:hover { background: var(--paper-deep); }
+.cb-toggle:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.cb-toggle[aria-pressed="true"] {
+  background: var(--orange);
+  color: #fff;
+  border-color: var(--orange);
+}
+
+/* Colorblind-friendly palette: high-contrast Okabe-Ito colors */
+:root.cb-mode {
+  --cb-U: #ffffff;
+  --cb-R: #d55e00;
+  --cb-F: #009e73;
+  --cb-D: #f0e442;
+  --cb-L: #cc79a7;
+  --cb-B: #0072b2;
+}
+
+/* Pattern overlays for colorblind mode — each face gets a unique texture */
+.cb-pattern-U { background-image: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px) !important; }
+.cb-pattern-R { background-image: repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px) !important; }
+.cb-pattern-F { background-image: repeating-linear-gradient(90deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px) !important; }
+.cb-pattern-D { background-image: repeating-linear-gradient(135deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px) !important; }
+.cb-pattern-L { background-image: radial-gradient(circle, rgba(0,0,0,0.15) 1px, transparent 1px) !important; background-size: 5px 5px !important; }
+.cb-pattern-B { background-image: repeating-linear-gradient(60deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px), repeating-linear-gradient(-60deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px) !important; }
+
+/* Colorblind mode: letter indicators on stickers */
+.cb-mode .sticker::after {
+  content: attr(data-cb-letter);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.6);
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.8);
+}
+
+.cb-mode .sticker.is-empty::after {
+  content: '';
+}
+
+/* Reduced motion: disable all animations and transitions */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .sticker:hover { transform: none; }
+  .btn-primary:hover { transform: none; }
 }
 
 .content-width { width: var(--content-width); margin-inline: auto; }
@@ -54,6 +170,7 @@ body {
   text-decoration: none; transition: color 0.2s;
 }
 .primary-nav a:hover { color: var(--link-hover); }
+.primary-nav a:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 
 /* Solver Section */
 .solver-section {
@@ -326,6 +443,7 @@ body {
   background: var(--paper-deep);
   box-shadow: inset 0 0 0 1px rgba(41, 42, 38, 0.25);
   transition: transform 0.1s, box-shadow 0.15s;
+  position: relative;
 }
 
 .sticker:hover { transform: scale(1.08); }
@@ -367,6 +485,7 @@ body {
 }
 
 .swatch:hover { background: var(--paper-deep); }
+.swatch:focus-visible { outline: 3px solid var(--orange); outline-offset: 2px; }
 
 .swatch.is-active {
   border-color: var(--orange);
