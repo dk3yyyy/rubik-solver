@@ -1,0 +1,26 @@
+# Render blueprint for a single service that serves both the app and the API.
+#
+# Deploy with New -> Blueprint in the Render dashboard and point it at this
+# repository. One service means one origin, so there is no proxy to configure,
+# no VITE_API_URL to set and no CORS to arrange.
+#
+# Render's native runtimes ship node and npm alongside Python, which is what
+# lets the build step produce frontend/dist for the API to serve. If that ever
+# stops being true, move this to a Dockerfile instead.
+services:
+  - type: web
+    name: rubik-solver
+    runtime: python
+    plan: free
+    buildCommand: >-
+      pip install -r backend/requirements.txt &&
+      npm --prefix frontend ci &&
+      npm --prefix frontend run build
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      # numpy >= 2.1 is required (see backend/requirements.txt). 3.12 has wheels
+      # for everything here, which keeps the install to downloads rather than
+      # source builds.
+      - key: PYTHON_VERSION
+        value: "3.12.7"

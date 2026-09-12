@@ -177,6 +177,34 @@ def test_webcam_scan_rejects_bad_base64(client):
     assert response.status_code == 400
 
 
+def test_health_reports_the_service_and_the_solver(client):
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["solver_ready"] is True
+    assert isinstance(body["webcam_available"], bool)
+
+
+def test_render_blueprint_matches_how_the_app_is_actually_run():
+    # The blueprint is only exercised on deploy, where a stale path fails late
+    # and quietly. Check it here instead.
+    root = Path(__file__).resolve().parents[2]
+    blueprint = (root / "render.yaml").read_text(encoding="utf-8")
+
+    for fragment in (
+        "pip install -r backend/requirements.txt",
+        "npm --prefix frontend ci",
+        "npm --prefix frontend run build",
+        "uvicorn main:app",
+        "healthCheckPath: /api/health",
+    ):
+        assert fragment in blueprint, fragment
+
+    for path in ("backend/requirements.txt", "backend/main.py", "frontend/package.json"):
+        assert (root / path).is_file(), path
+
+
 def test_detect_single_face_upload(client):
     from helpers import jpeg_bytes, make_face_image
 
