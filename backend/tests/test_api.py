@@ -168,6 +168,21 @@ def test_an_unsolvable_scan_says_what_usually_causes_it(client):
     assert "quarter turn out" in detail, detail
 
 
+def test_two_frames_of_the_same_face_are_named(client):
+    # Capturing the white face twice, or one frame washed out enough to read as
+    # white, used to surface as "Face U appears 18 times" after all six captures,
+    # which points at no frame in particular.
+    images = solved_faces()
+    images[3] = base64_face("U" * 9)  # frame 4 should be the yellow face
+    response = client.post("/api/webcam-scan", json={"images": images})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "frame 4" in detail, detail
+    assert "yellow" in detail and "white" in detail, detail
+    assert "Retake the frames named above" in detail, detail
+
+
 def test_webcam_scan_partial_scan_message_names_the_counts(client):
     response = client.post("/api/webcam-scan", json={"images": [base64_face("U" * 9)] * 3})
     assert response.status_code == 422

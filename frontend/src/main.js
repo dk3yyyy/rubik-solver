@@ -11,6 +11,7 @@ import {
   describeApiError,
   describeScanError,
   frameIsBlank,
+  framesLookIdentical,
   invertMove,
   movePlaybackState,
   moveToRotation,
@@ -389,6 +390,7 @@ class App {
     this.currentMoveIndex = 0;
     this.isPlaying = false;
     this.capturedFaces = [];
+    this.lastCapturePixels = null;
     this.timerDisplay = document.getElementById('timer');
     this.timerInterval = null;
     this.statusEl = document.getElementById('status');
@@ -841,6 +843,7 @@ class App {
     const panel = document.getElementById('webcam-panel');
     const video = document.getElementById('webcam-video');
     this.capturedFaces = [];
+    this.lastCapturePixels = null;
     this.updateWebcamHint();
     panel.hidden = false;
 
@@ -891,13 +894,25 @@ class App {
     probe.height = 32;
     const probeCtx = probe.getContext('2d');
     probeCtx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, 32, 32);
-    if (frameIsBlank(probeCtx.getImageData(0, 0, 32, 32).data)) {
+    const pixels = probeCtx.getImageData(0, 0, 32, 32).data;
+
+    if (frameIsBlank(pixels)) {
       this.setStatus(
         'The camera is showing a blank frame. Check that no other app is using it, then try again.',
         'error',
       );
       return;
     }
+
+    if (this.capturedFaces.length && framesLookIdentical(pixels, this.lastCapturePixels)) {
+      this.setStatus(
+        'That frame is the same as the last one, so the cube has not turned. Turn it to '
+        + 'the next face and press Capture again.',
+        'error',
+      );
+      return;
+    }
+    this.lastCapturePixels = pixels;
 
     this.capturedFaces.push(canvas.toDataURL('image/jpeg', 0.9));
     this.updateWebcamHint();
@@ -917,6 +932,9 @@ class App {
 
   async scanCapturedFaces() {
     this.setStatus('Scanning cube...', 'loading');
+    // The captures are spent, so a fresh scan should not compare its first frame
+    // against the last frame of this one.
+    this.lastCapturePixels = null;
     try {
       const data = await readApiResponse(await fetch(api('/webcam-scan'), {
         method: 'POST',

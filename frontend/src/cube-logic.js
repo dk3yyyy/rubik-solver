@@ -352,6 +352,24 @@ export function frameIsBlank(pixels) {
 }
 
 /**
+ * Two captures of the same face look the same. Pressing Capture twice without
+ * turning the cube used to pass through unnoticed and resurface six frames later
+ * as "Face U appears 18 times", which points at no frame in particular.
+ */
+export function framesLookIdentical(first, second, tolerance = 8) {
+  if (!first || !second || first.length !== second.length || first.length === 0) return false;
+  let total = 0;
+  let samples = 0;
+  for (let i = 0; i < first.length; i += 4) {
+    total += Math.abs(first[i] - second[i])
+      + Math.abs(first[i + 1] - second[i + 1])
+      + Math.abs(first[i + 2] - second[i + 2]);
+    samples += 3;
+  }
+  return total / samples < tolerance;
+}
+
+/**
  * Scan failures come back as geometry: "Invalid corner piece", "Face U appears 8
  * times". Add what to do about it, since the cause is nearly always how the cube
  * was held.
