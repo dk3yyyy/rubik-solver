@@ -31,6 +31,7 @@ import {
   faceletFromStickers,
   formatMove,
   frameIsBlank,
+  framesLookIdentical,
   invertMove,
   invertSequence,
   isLocalOrigin,
@@ -369,6 +370,19 @@ test('a blank camera frame is caught rather than blamed on the lighting', () => 
   assert.equal(frameIsBlank(new Uint8ClampedArray(32 * 32 * 4).fill(120)), false);
   assert.equal(frameIsBlank(null), true);
   assert.equal(frameIsBlank(new Uint8ClampedArray(0)), true);
+});
+
+test('capturing the same frame twice is caught at the press', () => {
+  const white = new Uint8ClampedArray(32 * 32 * 4).fill(240);
+  const red = new Uint8ClampedArray(32 * 32 * 4).fill(30);
+  red[0] = 200;
+
+  assert.equal(framesLookIdentical(white, new Uint8ClampedArray(32 * 32 * 4).fill(240)), true);
+  assert.equal(framesLookIdentical(white, red), false);
+  // Nonsense inputs must not be reported as a repeat, or capture would lock up.
+  assert.equal(framesLookIdentical(white, null), false);
+  assert.equal(framesLookIdentical(white, new Uint8ClampedArray(8)), false);
+  assert.equal(framesLookIdentical(new Uint8ClampedArray(0), new Uint8ClampedArray(0)), false);
 });
 
 test('a geometry failure carries the holding advice, others pass through', () => {

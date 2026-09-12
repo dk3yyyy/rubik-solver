@@ -40,6 +40,9 @@ FACE_COUNT = 6
 # facelets are written: U, R, F, D, L, B.
 FACE_ORDER = ("U", "R", "F", "D", "L", "B")
 
+# Facelet letters are colours, so these are for reading the messages back.
+FACE_NAMES = {"U": "white", "R": "red", "F": "green", "D": "yellow", "L": "orange", "B": "blue"}
+
 try:
     import webcam
 
@@ -426,6 +429,33 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
             detail=(
                 f"Could not read {unmatched} sticker(s) on face(s) {', '.join(failing)}. "
                 "Retake those faces straight on and evenly lit."
+            ),
+        )
+
+    # Every face has a different centre colour and they are captured in the order
+    # U, R, F, D, L, B, so an unexpected centre says which frame is wrong. Two
+    # frames of the same face, or one washed out enough to read as white, used to
+    # surface only as "Face U appears 18 times", which points at no frame at all.
+    wrong_centre = []
+    for index, (colors, _) in enumerate(per_face):
+        if index >= len(FACE_ORDER):
+            continue
+        center = colors[4] if len(colors) > 4 else None
+        if center is not None and center != FACE_ORDER[index]:
+            wrong_centre.append((index + 1, FACE_ORDER[index], center))
+
+    if wrong_centre:
+        described = "; ".join(
+            f"frame {position} should be the {FACE_NAMES[face]} ({face}) face but its "
+            f"centre reads as {FACE_NAMES[read]}"
+            for position, face, read in wrong_centre
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{described}. Each face has a different centre colour, so that frame "
+                "was either the wrong face or too washed out to read. Retake the "
+                "frames named above."
             ),
         )
 
