@@ -19,11 +19,13 @@ from __future__ import annotations
 import base64
 import binascii
 import os
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
@@ -42,6 +44,9 @@ except ImportError:  # pragma: no cover - OpenCV not installed
     webcam = None  # type: ignore[assignment]
     WEBCAM_AVAILABLE = False
 
+# Rate limiting store: client_ip -> list of request timestamps
+_rate_limit_store: dict[str, list[float]] = {}
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -56,12 +61,12 @@ app = FastAPI(title="Rubik's Cube Solver API", version="1.0.0", lifespan=lifespa
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[os.environ.get("ALLOWED_ORIGINS", "*")],
     # Wildcard origins and credentials are mutually exclusive per the CORS spec;
     # this API is unauthenticated so credentials are not needed.
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 # Chrome refuses to let a public https page reach a loopback address such as
@@ -74,6 +79,35 @@ _LOCAL_NETWORK_OPT_IN = {
     "access-control-request-local-network": "Access-Control-Allow-Local-Network",
 }
 
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Simple token-bucket rate limiter keyed by client IP."""
+    if request.url.path.startswith("/api/"):
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        window = 60  # 1 minute
+        
+        if client_ip not in _rate_limit_store:
+            _rate_limit_store[client_ip] = []
+        
+        # Remove old entries
+        _rate_limit_store[client_ip] = [
+            t for t in _rate_limit_store[client_ip] if now - t < window
+        ]
+        
+        # Check limit (10 requests per minute per IP)
+        if len(_rate_limit_store[client_ip]) >= 10:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded. Try again later."}
+            )
+        
+        _rate_limit_store[client_ip].append(now)
+    
+    response = await call_next(request)
+    return response
 
 @app.middleware("http")
 async def allow_local_network_access(request, call_next):
@@ -293,6 +327,14 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
             detail=f"At most {FACE_COUNT} face images are accepted (got {len(payloads)})",
         )
 
+    # Validate payload sizes before decoding
+    for payload in payloads:
+        if len(payload) > 2 * 1024 * 1024:  # ~2MB base64 limit
+            raise HTTPException(
+                status_code=413,
+                detail=f"Image payload too large (max ~2 MB base64)"
+            )
+
     face_colors: List[Optional[str]] = []
     scores: List[float] = []
     for payload in payloads:
@@ -333,8 +375,13 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
 async def detect_single_face(file: UploadFile = File(...)) -> DetectResponse:
     """Detect the nine stickers of a single uploaded face image."""
     detector = _require_webcam()
-
-    colors, confidence = detector.detect_face_colors(await file.read())
+    
+    # Limit file size to 5 MB
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum 5 MB.")
+    
+    colors, confidence = detector.detect_face_colors(content)
     if any(color is None for color in colors):
         raise HTTPException(status_code=422, detail="Could not classify every sticker on this face")
     return DetectResponse(
