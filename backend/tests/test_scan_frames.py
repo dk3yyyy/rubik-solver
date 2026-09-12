@@ -15,6 +15,7 @@ the same frame.
 import numpy as np
 import pytest
 
+import webcam
 from helpers import jpeg_roundtrip, make_face_image, make_frame
 from webcam import analyse_face, detect_face_colors
 
@@ -200,6 +201,102 @@ def _window_frame(frame_size=(480, 640)):
     img[150:160, :] = (20, 20, 20)
     img[310:320, :] = (20, 20, 20)
     return img
+
+
+def _framed_tiling(bx=240, by=160, tile=80, grout=5, thickness=3, margin=8):
+    """A tiled surface with a rectangle drawn around a 3x3 block of it.
+
+    The rectangle is what gives the edge detector a quadrilateral to read from,
+    and the tiling carries on outside it: a window frame, a picture frame, the
+    bezel of a monitor and a printed panel round a grid of flat cells all look
+    like this to the sampler, which is the scenery the continuation check exists
+    to refuse. The plain margin keeps the drawn line clear of the tiling's own
+    grout: a line drawn straight along the grout merges with it, no
+    quadrilateral is found at all, and the frame is then refused for the wrong
+    reason.
+    """
+    img = _tiled_frame(tile=tile, grout=grout)
+    block = 3 * tile
+    img[by - margin:by + block + margin, bx - margin:bx + block + margin] = (200, 220, 230)
+    img[by:by + block, bx:bx + block] = _tiled_frame(tile=tile, grout=grout,
+                                                     frame_size=(block, block))
+    img[by - thickness:by, bx - thickness:bx + block + thickness] = (10, 10, 10)
+    img[by + block:by + block + thickness, bx - thickness:bx + block + thickness] = (10, 10, 10)
+    img[by - thickness:by + block + thickness, bx - thickness:bx] = (10, 10, 10)
+    img[by - thickness:by + block + thickness, bx + block:bx + block + thickness] = (10, 10, 10)
+    return img
+
+
+def _probes_aimed_at_quads(frame):
+    """Run one frame, recording where the continuation check looked.
+
+    The check only sees the crop's position and size in the frame, so what it
+    was pointed at is the whole of its evidence for a quad crop: this returns
+    the probes that were aimed at a detected quadrilateral's own rect.
+    """
+    work = webcam._working_frame(frame)
+    rects = [webcam._quad_rect(quad) for quad in webcam._quad_list(work)]
+    probes = []
+    real = webcam._pattern_extends
+
+    def recorder(probe_frame, cx, cy, side, stats):
+        probes.append((cx, cy, side))
+        return real(probe_frame, cx, cy, side, stats)
+
+    webcam._pattern_extends = recorder
+    try:
+        result = analyse_face(frame)
+    finally:
+        webcam._pattern_extends = real
+
+    hits = [probe for probe in probes
+            if any(abs(probe[0] - rect[0]) < 2 and abs(probe[1] - rect[1]) < 2
+                   and abs(probe[2] - rect[2]) < 3 for rect in rects)]
+    return result, rects, hits
+
+
+@pytest.mark.parametrize(
+    "bx, by, thickness",
+    [(240, 160, 3), (200, 120, 3), (100, 60, 4)],
+)
+def test_a_rectangle_drawn_round_a_tiled_block_is_not_a_face(bx, by, thickness):
+    # The tiling is refused on its own (it is in the scenery sweep above); the
+    # same tiling with anything four-sided drawn round a 3x3 block of it used to
+    # come back as nine confident white stickers, because the crop read from the
+    # quadrilateral skipped the continuation check that refuses the tiling. The
+    # pattern carries on past the rectangle, which is the whole point of the
+    # probe.
+    frame = jpeg_roundtrip(_framed_tiling(bx=bx, by=by, thickness=thickness))
+    result = analyse_face(frame)
+    assert result["found"] is False, (bx, by, thickness, result["colours"])
+    assert result["colours"] == [None] * 9
+    assert result["confidence"] == 0.0
+
+
+def test_a_crop_read_from_a_quad_faces_the_continuation_check():
+    # A detected quadrilateral says where the crop is, not that what it holds is
+    # a face: the probe has to be aimed at the quadrilateral's own rect in the
+    # frame, like a window's is at the window. Without that, the framed tiling
+    # above is accepted with the check never called.
+    frame = jpeg_roundtrip(_framed_tiling())
+    result, rects, hits = _probes_aimed_at_quads(frame)
+    assert rects, "the frame should give the search a quadrilateral"
+    assert result["found"] is False, result["colours"]
+    assert hits, ("no probe was aimed at a quadrilateral, so the quad crop skipped "
+                  "the continuation check")
+
+
+def test_a_face_read_from_a_quad_is_still_checked_and_still_read():
+    # The other half of the same gate: a face held against a pale desk is still
+    # read from its own outline, and the read still went through the check, so
+    # the fix is not a blanket exemption for quads in either direction.
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=0.4, background=PALE_DESK))
+    result, rects, hits = _probes_aimed_at_quads(frame)
+    assert result["found"], result["reason"]
+    assert result["source"] == "quad"
+    assert result["framed"] is True
+    assert result["colours"] == SCRAMBLED
+    assert hits, "the quad crop was accepted without the continuation check"
 
 
 @pytest.mark.parametrize(
