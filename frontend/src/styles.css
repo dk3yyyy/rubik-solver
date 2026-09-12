@@ -267,11 +267,104 @@ body {
   margin: 0 auto;
 }
 
+.webcam-face-overlay {
+  position: absolute;
+  inset: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.face-overlay-box {
+  width: 160px;
+  height: 160px;
+  border: 3px dashed rgba(41, 42, 38, 0.3);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+
+.face-overlay-box.is-detected {
+  border: 3px solid #5a7a5e;
+  box-shadow: 0 0 0 4px rgba(90, 122, 94, 0.18);
+  transform: scale(1.02);
+}
+
+.face-overlay-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+  padding: 8px;
+}
+
+.face-overlay-box.is-detected .face-overlay-text {
+  color: #5a7a5e;
+}
+
+.webcam-confidence-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  margin-top: 8px;
+}
+
+.confidence-track {
+  flex: 1;
+  height: 6px;
+  background: var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.confidence-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  transition: width 0.2s, background 0.2s;
+  background: var(--line);
+}
+
+.confidence-fill.is-good {
+  background: #5a7a5e;
+}
+
+.confidence-fill.is-okay {
+  background: #c9a227;
+}
+
+.confidence-fill.is-poor {
+  background: #b71234;
+}
+
+.confidence-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  min-width: 80px;
+  text-align: right;
+}
+
 .webcam-buttons {
   display: flex;
   gap: 8px;
   justify-content: center;
   margin-top: 12px;
+}
+
+#webcam-auto-capture.is-active {
+  background: #5a7a5e;
+  color: #fff;
+  border-color: #5a7a5e;
+}
+
+#webcam-auto-capture.is-active:hover {
+  background: #4a6850;
 }
 
 .webcam-hint {

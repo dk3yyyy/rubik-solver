@@ -85,8 +85,20 @@
 
           <div id="webcam-panel" class="webcam-panel" hidden role="dialog" aria-label="Webcam cube scanner">
             <video id="webcam-video" autoplay playsinline aria-label="Camera feed"></video>
+            <div id="webcam-face-overlay" class="webcam-face-overlay">
+              <div class="face-overlay-box">
+                <span class="face-overlay-text">Position cube face here</span>
+              </div>
+            </div>
+            <div id="webcam-confidence-bar" class="webcam-confidence-bar" hidden>
+              <div class="confidence-track">
+                <div id="webcam-confidence-fill" class="confidence-fill"></div>
+              </div>
+              <span id="webcam-confidence-label" class="confidence-label">—</span>
+            </div>
             <div class="webcam-buttons">
               <button id="webcam-capture" class="btn btn-primary" type="button">Capture</button>
+              <button id="webcam-auto-capture" class="btn btn-ghost" type="button" aria-pressed="false">Auto-capture</button>
               <button id="webcam-close" class="btn btn-ghost" type="button">Close</button>
             </div>
             <p id="webcam-hint" class="webcam-hint">Point the camera at one face and capture all six, in order U, R, F, D, L, B.</p>

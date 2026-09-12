@@ -177,3 +177,104 @@ def get_color_statistics(image: Image) -> dict:
             avg = np.mean(region, axis=(0, 1))
             stats[f"{row},{col}"] = {"h": float(avg[0]), "s": float(avg[1]), "v": float(avg[2])}
     return stats
+
+
+def detect_face_stability(image: Image) -> dict:
+    """Analyse a frame and report whether a cube face is clearly visible.
+
+    Returns a dict with:
+        - ``face_detected``: bool — a quadrilateral of sufficient area was found
+        - ``coverage``: float — fraction of the frame the face occupies (0-1)
+        - ``confidence``: float — how classifiable the detected stickers are
+        - ``colours``: list — the nine facelet letters (or ``None``)
+        - ``grid_score``: float — how grid-like the interior edges are (0-1)
+
+    This powers the live face-detection overlay and auto-capture: the frontend
+    polls this endpoint and shows a green border when ``face_detected`` is true
+    and the confidence is high enough to trust a capture.
+    """
+    img = _to_bgr(image)
+    if img is None or img.size == 0:
+        return {
+            "face_detected": False,
+            "coverage": 0.0,
+            "confidence": 0.0,
+            "colours": [None] * 9,
+            "grid_score": 0.0,
+        }
+
+    height, width = img.shape[:2]
+    frame_area = max(1, height * width)
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 50, 150)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Find the best quadrilateral contour (the cube face).
+    best = None
+    best_area = 0.0
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area <= 1000 or area <= best_area:
+            continue
+        peri = cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, 0.1 * peri, True)
+        if len(approx) == 4:
+            best = approx
+            best_area = area
+
+    if best is None:
+        return {
+            "face_detected": False,
+            "coverage": 0.0,
+            "confidence": 0.0,
+            "colours": [None] * 9,
+            "grid_score": 0.0,
+        }
+
+    x, y, w, h = cv2.boundingRect(best)
+    coverage = best_area / frame_area
+
+    # Grid score: look for interior vertical/horizontal lines inside the face
+    # box. A real cube face has edges between the 3x3 stickers.
+    roi = edges[y:y + h, x:x + w]
+    if roi.size == 0:
+        grid_score = 0.0
+    else:
+        lines = cv2.HoughLinesP(roi, 1, np.pi / 180, threshold=30,
+                                minLineLength=min(w, h) // 4, maxLineGap=10)
+        if lines is None:
+            grid_score = 0.0
+        else:
+            # Count near-vertical and near-horizontal lines.
+            vertical = 0
+            horizontal = 0
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                dx = abs(x2 - x1)
+                dy = abs(y2 - y1)
+                if dx == 0 and dy == 0:
+                    continue
+                angle = abs(np.arctan2(dy, dx) * 180 / np.pi)
+                if angle <= 15:
+                    horizontal += 1
+                elif angle >= 75:
+                    vertical += 1
+            # A 3x3 grid has 2 interior vertical + 2 interior horizontal lines.
+            expected = 4
+            found = min(vertical, 2) + min(horizontal, 2)
+            grid_score = min(1.0, found / expected)
+
+    colours, confidence = detect_face_colors(image)
+
+    # Face is "detected" when coverage is reasonable and we have a quadrilateral.
+    face_detected = coverage > 0.05 and best is not None
+
+    return {
+        "face_detected": face_detected,
+        "coverage": round(coverage, 3),
+        "confidence": round(confidence, 3),
+        "colours": colours,
+        "grid_score": round(grid_score, 3),
+    }
