@@ -39,5 +39,10 @@ USER appuser
 
 EXPOSE 8000
 
-# uvicorn main:app lives in /app/backend, so run from there.
+# The WORKDIR above is /app so the COPY destinations land where they are expected,
+# but the app has to start inside backend/: main.py imports solver and validator by
+# bare name, so running uvicorn from /app fails with
+# "Could not import module \"main\"".
+WORKDIR /app/backend
+
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

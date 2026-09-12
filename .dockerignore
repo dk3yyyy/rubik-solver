@@ -1,0 +1,14 @@
+# Keep the build context small, and stop host artifacts from landing on top of
+# what npm ci and pip install produce inside the image. Without this, a host
+# frontend/node_modules is copied over the freshly installed Linux one.
+.git
+.github
+**/node_modules
+frontend/dist
+**/__pycache__
+**/*.pyc
+.venv
+venv
+backend/.cache
+.env
+.DS_Store

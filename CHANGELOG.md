@@ -12,11 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single Python image serving both the API and the built UI.
 - `docker-compose.yml` — one-command self-hosted deployment of the full stack
   on port 8000.
+- `.dockerignore` — keeps the build context to the source files the image
+  actually needs.
 - `CHANGELOG.md` — this file.
 - OpenAPI tags on every backend endpoint (`health`, `cube`, `scan`), so the
   Swagger UI at `/docs` groups routes by category.
 
-## [1.0.0] - 2025-09-01
+## [1.0.0] - 2026-09-12
 
 ### Added
 - FastAPI backend with a Kociemba two-phase solver: `/api/scramble`,

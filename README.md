@@ -470,6 +470,13 @@ Anywhere that runs a Python process or a container works the same way: install
 `frontend/dist` exists, then `cd backend && uvicorn main:app --host 0.0.0.0
 --port $PORT`.
 
+Docker is the shortest path. `docker compose up --build` builds the frontend and
+the backend into one image listening on port 8000, running as a non-root user.
+The solver rebuilds its pruning tables on every start; to keep them, mount a
+volume on `/home/appuser/.cache`, which is where the library writes them. Leave
+`TRUST_PROXY` unset unless a proxy you control sits in front of the app, because
+it makes the rate limiter trust a client-supplied header.
+
 Cloudflare Workers and Vercel's Python functions are a poor fit rather than an
 impossible one: the solver builds its pruning tables at startup, which costs
 seconds and tens of megabytes, and that sits badly with a short-lived function.
