@@ -16,9 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   colour.
 - A cube that is not held dead square is read correctly. A face-sized
   quadrilateral is straightened by perspective when one is found, and sought
-  otherwise over positions, sizes and small rotations, so a cube filling the
-  picture at an angle no longer has its edge stickers sampled from the
-  background.
+  otherwise over positions, sizes and small rotations. The rotations the
+  detected stickers suggest are tried at every position too, so a tilted face
+  held in the middle of the frame is read rather than refused: the tilt used to
+  be carried by the sticker lattice alone, which is only sought near a sticker.
+- A crop that shows a row of desk above two rows of face is refused. The
+  continuation check skipped its own probe when the crop sat against the frame
+  edge, because it threw away any band less than 30% on frame - and a crop
+  pushed up against the edge is exactly where a row of background gets inside
+  it. Wood is close to the orange of the R and L stickers, so the read was
+  plausible and confident. A thin band running the full width of the crop is
+  thousands of pixels and is compared now.
+- Plastic between the stickers is scored as a share close to a face's own rather
+  than as "more is better". A crop sitting on the junction of four stickers is
+  nearly half plastic and reads a blend of the four colours; rewarding its
+  plastic let it outrank the face.
 
 ### Changed
 - The frame sampler searches the whole picture for the face, not the middle of

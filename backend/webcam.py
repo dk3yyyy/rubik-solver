@@ -78,12 +78,13 @@ GRID_SAMPLE = 96
 # fraction of a cell at a time from there.
 GRID_POSITION_OFFSETS = (-0.30, -0.15, 0.0, 0.15, 0.30)
 GRID_SCALES = (0.28, 0.36, 0.46, 0.58, 0.72, 0.88)
-# Rotations tried around a coarse hit, in degrees. A detected quadrilateral's
-# own rotation is used as the centre of this range, because a sticker is rotated
-# by however much the cube is - but a face can be tilted with no usable outline
-# in view, so the range reaches as far as the sampler's cell tolerance allows on
-# its own.
-FINE_ANGLES = (-35.0, -28.0, -21.0, -14.0, -7.0, 0.0, 7.0, 14.0, 21.0, 28.0, 35.0)
+# Rotations tried around a coarse hit, in degrees. A detected quadrilateral's own
+# rotation is used as the centre of this range, and in practice it carries the
+# tilt on its own: on the 85-frame battery this range and an empty range give the
+# same verdicts. It stays as a fallback for a face tilted with no usable outline
+# in view, where the sticker rotation is all there is to go on, and it is kept
+# narrow because it is paid at every seed position.
+FINE_ANGLES = (-14.0, -7.0, 0.0, 7.0, 14.0)
 # A coarse hit is refined at these size steps and at every angle, and by moving
 # the crop a fraction of a cell, because the difference between reading nine
 # stickers and reading nine blends of two stickers either side is a fifth of a
@@ -436,6 +437,14 @@ def _read_is_stable(crop: np.ndarray, colours: List[Optional[str]]) -> bool:
     return True
 
 
+# A probe band that is mostly off the edge of the frame cannot say anything. The
+# test used to be a 30% share of the band, which quietly skipped the case this
+# check exists for: a crop pushed up against the frame edge, where the band above
+# it is thin but runs the full width of the crop and holds thousands of pixels.
+# A sliver of a few pixels says nothing; a thin wide band says plenty.
+MIN_PROBE_SHARE = 0.08
+
+
 def _pattern_extends(frame: np.ndarray, cx: float, cy: float, side: float,
                     stats: dict) -> int:
     """How many directions the sticker pattern carries on beyond the crop.
@@ -467,8 +476,8 @@ def _pattern_extends(frame: np.ndarray, cx: float, cy: float, side: float,
         x0, y0, x1, y1 = (int(round(value)) for value in box)
         if x1 - x0 < 2 or y1 - y0 < 2:
             continue
-        if (x1 - x0) * (y1 - y0) < 0.3 * depth * side:
-            continue  # mostly off the edge of the frame
+        if (x1 - x0) * (y1 - y0) < MIN_PROBE_SHARE * depth * side:
+            continue  # a sliver of frame edge is not evidence either way
         hits = 0
         for index, cell_index in enumerate(cells):
             if vertical:
@@ -769,72 +778,6 @@ def analyse_face(image: Image) -> dict:
 
 
 # ------------------------------------------------------- legacy face sampler ---
-
-
-def _flat_cells(img: np.ndarray) -> int:
-    """How many of the nine cells look like one flat sticker.
-
-    A cell that straddles a sticker edge, a gap or the background varies across
-    itself; one sitting on a sticker does not.
-    """
-    if img is None or img.size == 0:
-        return 0
-    height, width = img.shape[:2]
-    cell_h, cell_w = height // 3, width // 3
-    if cell_h < 3 or cell_w < 3:
-        return 0
-
-    half_h = max(6, int(cell_h * 0.28))
-    half_w = max(6, int(cell_w * 0.28))
-
-    flat = 0
-    for row in range(3):
-        for col in range(3):
-            cy = row * cell_h + cell_h // 2
-            cx = col * cell_w + cell_w // 2
-            patch = img[max(0, cy - half_h):cy + half_h, max(0, cx - half_w):cx + half_w]
-            if patch.size == 0:
-                continue
-            mean = patch.reshape(-1, 3).mean(axis=0)
-            quarters = (
-                patch[: patch.shape[0] // 2, : patch.shape[1] // 2],
-                patch[: patch.shape[0] // 2, patch.shape[1] // 2:],
-                patch[patch.shape[0] // 2:, : patch.shape[1] // 2],
-                patch[patch.shape[0] // 2:, patch.shape[1] // 2:],
-            )
-            worst = 0.0
-            for quarter in quarters:
-                if quarter.size == 0:
-                    continue
-                quarter_mean = quarter.reshape(-1, 3).mean(axis=0)
-                worst = max(worst, float(np.abs(quarter_mean - mean).max()))
-            if worst < FLAT_SPREAD_MAX:
-                flat += 1
-    return flat
-
-
-def _gap_fraction(img: np.ndarray) -> float:
-    """Share of the crop that is near-black sticker gap."""
-    if img is None or img.size == 0:
-        return 0.0
-    value = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)[:, :, 2]
-    return float(np.count_nonzero(value < GAP_MAX_VALUE)) / max(1, value.size)
-
-
-def _score_crop(crop: np.ndarray) -> Tuple[int, int, float]:
-    """``(stickers read, flat cells, sticker gaps)`` for one candidate crop."""
-    colours, _ = _sample_grid_colours(crop)
-    matched = sum(1 for color in colours if color is not None)
-    return matched, _flat_cells(crop), _gap_fraction(crop)
-
-
-def _centre_square(img: np.ndarray, scale: float) -> np.ndarray:
-    """The middle of the frame, sized to ``scale`` of its shorter side."""
-    height, width = img.shape[:2]
-    side = max(3, int(min(height, width) * scale))
-    top = (height - side) // 2
-    left = (width - side) // 2
-    return img[top:top + side, left:left + side]
 
 
 def _find_face_box(img: np.ndarray) -> Tuple[int, int, int, int]:

@@ -5,6 +5,11 @@ but its centre reads as green" while the cube in front of the camera was fine.
 The sampler took the bounding box of the largest four-sided contour, and when it
 found none it sampled the whole picture, so the nine "stickers" were nine patches
 of the room and the scan blamed the cube for them.
+
+Every frame here goes through JPEG, because that is what the browser sends and
+what the endpoint decodes. Frames fed in as raw arrays hid a defect once already:
+a face tilted 21 degrees was read from a raw array and refused from the JPEG of
+the same frame.
 """
 
 import numpy as np
@@ -17,6 +22,12 @@ from webcam import analyse_face, detect_face_colors
 # shows up as the wrong letters.
 SCRAMBLED = list("URFDLBURF")
 
+# The desk colours are not decoration: wood is close to the orange of the R and
+# L stickers, which is what lets a crop that has strayed off the face still read
+# as nine plausible colours.
+WOOD = (120, 160, 190)
+PALE_DESK = (200, 200, 200)
+
 
 def test_the_frame_is_read_from_the_middle_not_the_whole_picture():
     # A green band across the top of the frame, a red-faced cube held level in
@@ -28,14 +39,14 @@ def test_the_frame_is_read_from_the_middle_not_the_whole_picture():
         coverage=0.5,
         quads=[([(0, 0), (640, 0), (640, 150), (0, 150)], (0, 200, 0))],
     )
-    result = analyse_face(frame)
+    result = analyse_face(jpeg_roundtrip(frame))
     assert result["found"], result["reason"]
     assert result["colours"] == list("UUUUUUUUU"), result["colours"]
 
 
 def test_a_frame_with_no_cube_is_refused_rather_than_invented():
     desk = np.full((480, 640, 3), 70, dtype=np.uint8)
-    result = analyse_face(desk)
+    result = analyse_face(jpeg_roundtrip(desk))
     assert result["found"] is False
     assert result["colours"] == [None] * 9
     assert "could be read" in result["reason"]
@@ -49,7 +60,7 @@ def test_a_busy_room_is_refused_rather_than_read_as_stickers():
         frame[:, x:x + 12] = (90, 80, 60)
     for y in range(0, 480, 60):
         frame[y:y + 20, :] = (60, 60, 60)
-    result = analyse_face(frame)
+    result = analyse_face(jpeg_roundtrip(frame))
     assert result["found"] is False, result["colours"]
 
 
@@ -61,7 +72,7 @@ def test_a_bright_background_does_not_become_the_face():
         coverage=0.55,
         quads=[([(30, 20), (610, 20), (610, 250), (30, 250)], (250, 250, 250))],
     )
-    result = analyse_face(frame)
+    result = analyse_face(jpeg_roundtrip(frame))
     assert result["found"], result["reason"]
     assert result["colours"] == SCRAMBLED, result["colours"]
 
@@ -69,23 +80,23 @@ def test_a_bright_background_does_not_become_the_face():
 @pytest.mark.parametrize("angle", [0, 7, 14, 21, 28])
 def test_a_tilted_cube_is_still_read(angle):
     # Nobody holds a cube dead square to the camera.
-    frame = make_frame(SCRAMBLED, coverage=0.7, angle=angle)
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=0.7, angle=angle))
     result = analyse_face(frame)
-    assert result["found"], result["reason"]
-    assert result["colours"] == SCRAMBLED, result["colours"]
+    assert result["found"], (angle, result["reason"])
+    assert result["colours"] == SCRAMBLED, (angle, result["colours"])
 
 
 @pytest.mark.parametrize("coverage", [0.35, 0.5, 0.7, 0.9])
 def test_the_cube_is_read_however_much_of_the_frame_it_fills(coverage):
-    frame = make_frame(SCRAMBLED, coverage=coverage)
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=coverage))
     result = analyse_face(frame)
-    assert result["found"], result["reason"]
-    assert result["colours"] == SCRAMBLED, result["colours"]
+    assert result["found"], (coverage, result["reason"])
+    assert result["colours"] == SCRAMBLED, (coverage, result["colours"])
 
 
 def test_a_solid_face_is_read_whichever_alignment_wins():
     for letter in "URFDLB":
-        result = analyse_face(make_frame(letter * 9, coverage=0.6))
+        result = analyse_face(jpeg_roundtrip(make_frame(letter * 9, coverage=0.6)))
         assert result["found"], (letter, result["reason"])
         assert result["colours"] == [letter] * 9, (letter, result["colours"])
 
@@ -95,7 +106,7 @@ def test_a_face_is_not_read_from_a_sticker_sized_crop():
     # face, because a face has rounded corners. A crop that small was accepted
     # and reported with full confidence, which is how a scan came back with a
     # plausible-looking cube read entirely from one corner.
-    frame = make_frame(SCRAMBLED, coverage=0.6)
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=0.6))
     result = analyse_face(frame)
     assert result["found"], result["reason"]
     # All nine stickers of the face, which a one-sticker crop cannot produce.
@@ -107,10 +118,10 @@ def test_stickers_that_touch_are_still_read_as_a_face(coverage):
     # A cube whose stickers have no plastic visible between them: nine flat
     # cells with nothing to separate them. The old sampler read one of those
     # cells as the whole face ("U U U U U U U U U" for a scrambled face).
-    frame = make_frame(SCRAMBLED, coverage=coverage, gap=0)
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=coverage, gap=0))
     result = analyse_face(frame)
-    assert result["found"], result["reason"]
-    assert result["colours"] == SCRAMBLED, result["colours"]
+    assert result["found"], (coverage, result["reason"])
+    assert result["colours"] == SCRAMBLED, (coverage, result["colours"])
 
 
 @pytest.mark.parametrize("dx", [-160, -120, -80, -40, 40, 80, 120])
@@ -118,7 +129,7 @@ def test_a_cube_held_off_centre_is_read_where_it_is(dx):
     # The sampler looked only at the middle of the frame, so a cube held to one
     # side was refused, or worse read from whatever the middle happened to be.
     frame = make_frame(SCRAMBLED, coverage=0.6, centre=(320 + dx, 240))
-    result = analyse_face(frame)
+    result = analyse_face(jpeg_roundtrip(frame))
     assert result["found"], (dx, result["reason"])
     assert result["colours"] == SCRAMBLED, (dx, result["colours"])
 
@@ -128,17 +139,31 @@ def test_a_cube_at_arm_s_length_on_a_bright_desk_is_read(cov):
     # The face outline is visible against a bright desk, and the face is small:
     # this is the frame the pre-fix code read sticker for sticker and the first
     # version of the centre search answered with the desk.
-    frame = make_frame(SCRAMBLED, coverage=cov, background=(200, 200, 200))
-    result = analyse_face(frame)
-    assert result["found"], result["reason"]
-    assert result["colours"] == SCRAMBLED, result["colours"]
+    frame = make_frame(SCRAMBLED, coverage=cov, background=PALE_DESK)
+    result = analyse_face(jpeg_roundtrip(frame))
+    assert result["found"], (cov, result["reason"])
+    assert result["colours"] == SCRAMBLED, (cov, result["colours"])
+
+
+@pytest.mark.parametrize("dx", [60, 100, 140])
+def test_a_cube_on_a_wooden_desk_is_read_as_the_face_not_the_desk(dx):
+    # Wood is the colour of the R and L stickers, so a crop that runs one row
+    # too high reads its top row of desk as three more stickers and the face
+    # below it still reads, which is a plausible-looking wrong answer rather
+    # than a refusal. The continuation check exists to catch exactly that, and
+    # it was skipping its own probe: a crop pushed up against the frame edge
+    # leaves a band too thin for the share test the probe used, so the row of
+    # desk inside the crop was never questioned.
+    frame = make_frame(SCRAMBLED, coverage=0.6, background=WOOD, centre=(320 + dx, 240))
+    result = analyse_face(jpeg_roundtrip(frame))
+    assert result["found"], (dx, result["reason"])
+    assert result["colours"] == SCRAMBLED, (dx, result["colours"])
 
 
 @pytest.mark.parametrize("angle", [39, 40, 45])
 def test_a_cube_tilted_past_the_search_window_is_never_read_wrong(angle):
     # Past the range of rotations the search tries, the answer has to be "no"
-    # (or the right answer), never nine confident wrong stickers. JPEG, because
-    # that is what the browser sends and what the endpoint decodes.
+    # (or the right answer), never nine confident wrong stickers.
     frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=0.7, angle=angle))
     result = analyse_face(frame)
     if result["found"]:
@@ -151,7 +176,6 @@ def test_a_cube_too_close_to_read_is_not_turned_into_one_sticker(coverage):
     # Reading the middle of one sticker nine times is the failure to avoid, and
     # a crop sitting on a junction between four stickers - nearly half plastic,
     # reading a blend of the four colours - must not outrank the face either.
-    # JPEG, because that is what the browser sends and what the endpoint decodes.
     frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=coverage))
     result = analyse_face(frame)
     if result["found"]:
@@ -181,7 +205,7 @@ def _window_frame(frame_size=(480, 640)):
 @pytest.mark.parametrize(
     "name, frame",
     [
-        ("wooden desk", np.full((480, 640, 3), (120, 160, 190), dtype=np.uint8)),
+        ("wooden desk", np.full((480, 640, 3), WOOD, dtype=np.uint8)),
         ("white wall", np.full((480, 640, 3), (245, 245, 245), dtype=np.uint8)),
         ("hand in shot", np.full((480, 640, 3), (140, 160, 200), dtype=np.uint8)),
         ("tiled floor", _tiled_frame()),
@@ -193,8 +217,7 @@ def test_scenery_that_looks_like_a_face_at_a_glance_is_refused(name, frame):
     # what a tiled floor, a radiator grille or a window looks like. What a face
     # does not do is carry on: beyond its ninth sticker is the room, not another
     # sticker of the same colour. These frames used to come back as nine
-    # confident white stickers and the scan blamed the cube for them. JPEG,
-    # because that is what the browser sends and what the endpoint decodes.
+    # confident white stickers and the scan blamed the cube for them.
     result = analyse_face(jpeg_roundtrip(frame))
     assert result["found"] is False, (name, result["colours"])
     assert result["colours"] == [None] * 9
@@ -216,10 +239,9 @@ def test_a_detected_face_outline_is_used_and_said_so():
     # A face held against a pale desk has a visible outline. Straightening it by
     # perspective is the most direct reading available, so the result says that
     # is where the nine stickers came from.
-    frame = make_frame(SCRAMBLED, coverage=0.4, background=(200, 200, 200))
-    result = analyse_face(frame)
+    frame = make_frame(SCRAMBLED, coverage=0.4, background=PALE_DESK)
+    result = analyse_face(jpeg_roundtrip(frame))
     assert result["found"], result["reason"]
     assert result["source"] == "quad", result["source"]
     assert result["framed"] is True
     assert result["colours"] == SCRAMBLED, result["colours"]
-
