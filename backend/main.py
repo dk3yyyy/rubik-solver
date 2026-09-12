@@ -16,12 +16,11 @@ cube (or an unreadable scan), 503 when the solver tables are unavailable.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
+import json
 import logging
 import os
-import signal
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -51,7 +50,7 @@ class StructuredFormatter(logging.Formatter):
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        payload = {
+        payload: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
@@ -64,12 +63,19 @@ class StructuredFormatter(logging.Formatter):
             "args", "asctime", "created", "exc_info", "exc_text", "filename",
             "funcName", "levelname", "levelno", "lineno", "module", "msecs",
             "message", "msg", "name", "pathname", "process", "processName",
-            "relativeCreated", "stack_info", "thread", "threadName",
+            "relativeCreated", "stack_info", "taskName", "thread", "threadName",
         }
         for key, value in record.__dict__.items():
             if key not in standard and key not in payload:
-                payload[key] = value
-        return str(payload).replace("'", '"')
+                # Only short primitives: a future extra={...} must not be able to
+                # drop a request body or a base64 image into the log line.
+                if isinstance(value, str):
+                    payload[key] = value if len(value) <= 200 else value[:197] + "..."
+                elif isinstance(value, (int, float, bool)) or value is None:
+                    payload[key] = value
+        # str(payload) is not JSON. It writes True and None in Python spelling, and
+        # an apostrophe inside a value ends up breaking the quoting.
+        return json.dumps(payload, default=str)
 
 
 def _configure_logging() -> None:
@@ -137,18 +143,12 @@ async def lifespan(app_instance: FastAPI):
     solver.init()
     logger.info("Startup complete: solver ready=%s", solver.is_ready())
 
-    shutdown_event = asyncio.Event()
-
-    def _handle_signal(signum, frame):
-        sig_name = signal.Signals(signum).name
-        logger.info("Received %s, initiating graceful shutdown", sig_name)
-        shutdown_event.set()
-
-    # Register signal handlers for graceful shutdown. uvicorn installs its own
-    # handlers, so we chain: set our event and let uvicorn's handler proceed.
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, _handle_signal)
-
+    # No signal handlers here. uvicorn installs its own for SIGTERM and SIGINT
+    # before this lifespan runs, and those are what reach this shutdown block;
+    # registering our own replaced them, so the process logged that it was
+    # shutting down and then kept serving until it was killed. It also broke the
+    # tests, because signal.signal() only works on the main thread and TestClient
+    # runs startup on a worker.
     yield
 
     # Shutdown: drain in-flight requests, close resources.
