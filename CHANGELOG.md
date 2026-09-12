@@ -31,6 +31,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than as "more is better". A crop sitting on the junction of four stickers is
   nearly half plastic and reads a blend of the four colours; rewarding its
   plastic let it outrank the face.
+- A crop read from a detected quadrilateral goes through the continuation check
+  like any other. The check was skipped unless the crop came from a square
+  window, so a tiled surface was read as nine confident stickers as soon as
+  anything four-sided was drawn round a 3x3 block of it: a window frame, a
+  picture frame, a monitor bezel or a printed panel all hand the search the
+  same outline a real face does. A quad says where the crop is, not that what
+  it holds is a cube face.
+- The copy-link button, the inspection timer and the ao5/ao12 stats panel have
+  the markup `main.js` has always looked up. `#btn-copy-link`,
+  `#inspection-timer` and `#speedcubing-stats` arrived with the deep-link work
+  and index.html never had the elements, so three finished features had no UI:
+  the button now sits beside Copy in the move history actions, the countdown in
+  the timer display carrying the class its stylesheet animates, and the stats
+  panel is the `stats-panel` card the stylesheet already styled.
 
 ### Changed
 - The frame sampler searches the whole picture for the face, not the middle of
