@@ -113,6 +113,14 @@ FLAT_SPREAD_MAX = 40
 MIN_INTERNAL_LINES = 3
 LINE_DARK_DROP = 22.0
 LINE_COLOUR_GAP = 38.0
+# How much a probe band's colour has to vary inside itself before it can be the
+# next cell of the pattern rather than a plain surface of the same colour. A
+# cell of a continuing pattern shows its own boundary - the plastic between
+# stickers, or the colour change to the cell beyond it - and that is a contrast
+# of 150 units or more. A wall the cube is held against is flat to within JPEG
+# noise, which is a handful of units. Only quad crops ask for this: see
+# _pattern_extends.
+BAND_FLAT_RANGE = 30
 # Sticker gaps are near-black plastic. How much of a face crop they cover is
 # roughly the same for any cube - the plastic lines between nine stickers - so
 # the score rewards a crop that looks like that and penalises one that does not:
@@ -398,6 +406,24 @@ def _quad_angle(quad: np.ndarray) -> float:
     return float(np.degrees(np.arctan2(top[1], top[0])))
 
 
+def _quad_rect(quad: np.ndarray) -> Tuple[float, float, float]:
+    """Where a detected quadrilateral sits in the frame: centre and side.
+
+    A quad candidate is measured on the rectified warp of the quad, but the
+    continuation check has to look at the frame, just outside the crop. For a
+    square window that is the window's own rect; for a quad it is the
+    quadrilateral's: the centre of its four corners and the longer side of its
+    bounding box. A face photographed at an angle is not axis-aligned, so the
+    bounding box is only exactly the quad's extent when the quad is square to
+    the camera; a probe that starts a little further out on a tilted quad is
+    safer than one that starts inside it.
+    """
+    points = np.asarray(quad, dtype=np.float32).reshape(4, 2)
+    centre = points.mean(axis=0)
+    _, _, box_w, box_h = cv2.boundingRect(points)
+    return float(centre[0]), float(centre[1]), float(max(box_w, box_h))
+
+
 # ------------------------------------------------------------------- search ---
 
 
@@ -445,8 +471,18 @@ def _read_is_stable(crop: np.ndarray, colours: List[Optional[str]]) -> bool:
 MIN_PROBE_SHARE = 0.08
 
 
+def _band_is_plain(cell: np.ndarray) -> bool:
+    """Whether a probe band cell is a flat surface rather than the next cell.
+
+    A cell of a pattern that carries on shows its own boundary inside the band:
+    the plastic between stickers, or the colour change to the cell beyond it. A
+    wall the cube is held against shows neither.
+    """
+    return float(cell.max()) - float(cell.min()) < BAND_FLAT_RANGE
+
+
 def _pattern_extends(frame: np.ndarray, cx: float, cy: float, side: float,
-                    stats: dict) -> int:
+                    stats: dict, structure: bool = False) -> int:
     """How many directions the sticker pattern carries on beyond the crop.
 
     A cube face ends: one cell beyond the crop is the room, or another face, not
@@ -456,6 +492,16 @@ def _pattern_extends(frame: np.ndarray, cx: float, cy: float, side: float,
     stickers. The comparison is on the actual colour, not the facelet letter:
     a white sticker and a pale grey desk are both "white", but only one of them
     is the sticker next door.
+
+    ``structure`` asks for one thing more, and only a crop taken from a detected
+    quadrilateral asks for it: the band has to show the *next cell's* boundary as
+    well as its colour. A quad is where the outline of a framed tile or a printed
+    panel lands, and the tiling outside it carries on with its own lines. It is
+    also where a cube held against a white wall lands, and that wall is flat: nine
+    white stickers against a white wall, probed on colour alone, are nine cells
+    that "carry on" into the wall and the whole frame is refused. Measured on a
+    160-frame battery, asking for the lines is the difference between refusing 7
+    real frames that a window crop had always refused and reading them.
 
     Directions with nothing but frame edge beyond them are ignored, so a cube
     that fills the picture is not held against this.
@@ -492,6 +538,8 @@ def _pattern_extends(frame: np.ndarray, cx: float, cy: float, side: float,
                 continue
             mean = cell.reshape(-1, 3).mean(axis=0)
             if float(np.abs(mean - means[cell_index]).max()) <= LINE_COLOUR_GAP:
+                if structure and _band_is_plain(cell):
+                    continue  # a flat surface of the same colour is not the next cell
                 hits += 1
         if hits >= 2:
             continuing += 1
@@ -547,8 +595,11 @@ def analyse_face(image: Image) -> dict:
     face-sized quadrilateral straightened by perspective, and windows of the
     frame at several positions, sizes and small rotations. A crop is only
     accepted when all nine of its cells read as cube colours *and* it shows the
-    3x3 structure of a face, so a patch of wall, a wooden desk or a window with
-    mullions is refused instead of being turned into nine confident stickers.
+    3x3 structure of a face *and* the pattern stops where the crop does, so a
+    patch of wall, a wooden desk or a window with mullions is refused instead of
+    being turned into nine confident stickers. The last of those is asked of
+    every crop, quads included: a four-sided outline is how a picture frame, a
+    monitor bezel and a printed panel are refused, not a reason to trust them.
 
     Returns a dict with ``colours`` (nine letters or ``None``), ``confidence``,
     ``found`` (nine readable stickers), ``framed`` (the nine came from a
@@ -573,7 +624,8 @@ def analyse_face(image: Image) -> dict:
             rotations[key] = _rotated(work, key)
         return rotations[key]
 
-    candidates: List[Tuple[str, float, float, float, Tuple[float, float], np.ndarray]] = []
+    candidates: List[Tuple[str, float, float, float, Tuple[float, float], np.ndarray,
+                          Optional[Tuple[float, float, float]]]] = []
     quadrangles = _quad_list(work)
     seeds: List[Tuple[tuple, float, float, float, float]] = []
     centroids: List[np.ndarray] = []
@@ -581,14 +633,18 @@ def analyse_face(image: Image) -> dict:
 
     # 1. Every detected quadrilateral is a candidate crop in its own right,
     #    straightened by perspective, and a hint about how the cube is rotated.
+    #    Its rect in the frame is carried with it: a quad says where the crop
+    #    is, not that what it holds is a face, so the crop still has to face the
+    #    continuation check like any other.
     for quad in quadrangles:
         angle = round(_quad_angle(quad), 1)
         side = float(np.sqrt(max(1.0, cv2.contourArea(quad))))
         coverage = min(1.0, (side * side) / frame_area)
+        rect = _quad_rect(quad)
         for inset in QUAD_INSETS:
             shape = _inset_quad(quad, inset)
             candidates.append(("quad", angle, coverage, coverage,
-                               (0.0, 0.0), warp_face(work, shape)))
+                               (0.0, 0.0), warp_face(work, shape), rect))
 
         # 2. A coarse sweep to find where the face is, anchored on the detected
         #    shape: a sticker puts the face centre within one sticker of it and
@@ -686,7 +742,7 @@ def analyse_face(image: Image) -> dict:
             if crop is None:
                 continue
             candidates.append(("centre", round(angle, 1), round(scale * step, 3),
-                               crop.shape[0] / short, (dx, dy), crop))
+                               crop.shape[0] / short, (dx, dy), crop, None))
 
     for index, (dx, dy, scale, base) in enumerate(seed_picks):
         if index < FINE_NUDGE_SEEDS:
@@ -708,9 +764,10 @@ def analyse_face(image: Image) -> dict:
         return _rejected("no crop could be sampled")
 
     rows = []
-    for source, angle, scale, coverage, offset, crop in candidates:
+    for source, angle, scale, coverage, offset, crop, rect in candidates:
         stats = _crop_stats(crop)
-        rows.append((_score(stats, coverage, angle), (source, angle, scale, coverage, offset, crop), stats))
+        rows.append((_score(stats, coverage, angle),
+                     (source, angle, scale, coverage, offset, crop, rect), stats))
     rows.sort(key=lambda row: row[0], reverse=True)
 
     # A detected face-sized quadrilateral is direct evidence of where the face
@@ -731,11 +788,24 @@ def analyse_face(image: Image) -> dict:
                 break
             if not _read_is_stable(candidate[5], list(stats["colours"])):
                 continue
+            # The continuation check is not optional for a crop read from a
+            # detected quadrilateral. A quad says where the crop is, not that
+            # what it holds is a cube face: a window frame, a picture frame, a
+            # monitor bezel and a printed panel all hand the search the same
+            # four-sided outline a real face does, and the grid inside them
+            # carries on past that outline exactly like a tiled floor. Skipping
+            # the check for quads is what let a monochrome tiling read as nine
+            # confident stickers as soon as anything four-sided was drawn round
+            # a 3x3 block of it.
             if candidate[0] == "centre":
                 ox, oy = _rotated_offset(candidate[4][0] * short, candidate[4][1] * short,
                                          candidate[1])
                 if _pattern_extends(rotated(candidate[1]), width / 2.0 + ox, height / 2.0 + oy,
                                     candidate[2] * short, stats) >= 1:
+                    continue
+            else:
+                cx, cy, side = candidate[6]
+                if _pattern_extends(work, cx, cy, side, stats, structure=True) >= 1:
                     continue
             chosen = (score, candidate, stats)
             break

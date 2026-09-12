@@ -218,6 +218,43 @@ def make_window_frame(*, frame_size=(480, 640)) -> np.ndarray:
     return img
 
 
+def make_framed_tiling_frame(*, block_origin=(240, 160), tile: int = 80, grout: int = 5,
+                            thickness: int = 3, margin: int = 8,
+                            frame_size=(480, 640)) -> np.ndarray:
+    """A tiled surface with a rectangle drawn around a 3x3 block of it.
+
+    The rectangle gives the edge detector a quadrilateral to take the crop from,
+    and the tiling carries on outside it: a window frame, a picture frame, the
+    bezel of a monitor or a printed panel round a grid of flat cells. Every one
+    of those was read as nine confident stickers while the continuation check was
+    applied only to crops taken from a square window - the defect of #30, and the
+    frame that made the scan answer with a cube state for a picture of a wall.
+
+    The plain margin keeps the drawn line clear of the tiling's own grout: a line
+    drawn along the grout merges with it, no quadrilateral is found at all, and
+    the frame is then refused for a reason that has nothing to do with this.
+    """
+    height, width = frame_size
+    block = 3 * tile
+    bx, by = block_origin
+    colour = (200, 220, 230)
+    img = make_tiled_frame(tile=tile, grout=grout, frame_size=(height, width))
+    img[by - margin:by + block + margin, bx - margin:bx + block + margin] = colour
+    img[by:by + block, bx:bx + block] = make_tiled_frame(
+        tile=tile, grout=grout, frame_size=(block, block)
+    )
+    img[by - thickness:by, bx - thickness:bx + block + thickness] = (10, 10, 10)
+    img[by + block:by + block + thickness, bx - thickness:bx + block + thickness] = (10, 10, 10)
+    img[by - thickness:by + block + thickness, bx - thickness:bx] = (10, 10, 10)
+    img[by - thickness:by + block + thickness, bx + block:bx + block + thickness] = (10, 10, 10)
+    return img
+
+
 def base64_frame(letters: Sequence[str], **kwargs) -> str:
     """A full camera frame, as the scanner receives it, base64 JPEG."""
     return base64.b64encode(jpeg_bytes(make_frame(letters, **kwargs))).decode()
+
+
+def base64_framed_tiling(**kwargs) -> str:
+    """A framed tiling frame, as the scanner receives it, base64 JPEG."""
+    return base64.b64encode(jpeg_bytes(make_framed_tiling_frame(**kwargs))).decode()

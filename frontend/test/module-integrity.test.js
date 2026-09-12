@@ -99,12 +99,11 @@ test('the checker accepts a method, a field callback and a constructor option', 
 // Ids the source looks up that the markup does not have. Each one is a feature
 // with no UI, which arrived with the PR that added the code. They are listed
 // rather than ignored so that a *new* one fails the test, and so that the debt
-// is visible in one place; removing an entry means adding the element.
-const MISSING_FROM_MARKUP = new Map([
-  ['btn-copy-link', 'the copy-link button: PR #21 added the handler, never the button'],
-  ['inspection-timer', 'the inspection timer display: PR #21 added the logic, never the element'],
-  ['speedcubing-stats', 'the ao5/ao12 stats panel: PR #21 added the module, never the element'],
-]);
+// is visible in one place; removing an entry means adding the element. The list
+// is empty now - the copy-link button, the inspection timer and the ao5/ao12
+// stats panel all have markup - but it stays so the next gap has somewhere to
+// show up.
+const MISSING_FROM_MARKUP = new Map();
 
 test('every getElementById in the source has that id in the markup', () => {
   const html = fs.readFileSync(path.join(SRC, '..', 'index.html'), 'utf8');
@@ -129,6 +128,43 @@ test('every getElementById in the source has that id in the markup', () => {
   assert.deepEqual(problems, []);
   const stale = [...MISSING_FROM_MARKUP.keys()].filter((id) => !stillReferenced.has(id));
   assert.deepEqual(stale, [], 'these ids now have markup (or no longer exist): drop them from the list');
+});
+
+/**
+ * The markup from a block's opening tag to its matching closing tag, so a test
+ * can say *where* an element has to be and not only that it exists somewhere.
+ * Only `<div>` nesting is counted, which is all the index markup nests.
+ */
+function blockFor(html, start) {
+  const from = html.indexOf(start);
+  assert.ok(from !== -1, `the markup has no ${start}`);
+  const tag = /<\/?div\b/g;
+  tag.lastIndex = from;
+  let depth = 0;
+  let match;
+  while ((match = tag.exec(html))) {
+    depth += match[0] === '</div' ? -1 : 1;
+    if (depth === 0) return html.slice(from, tag.lastIndex);
+  }
+  return html.slice(from);
+}
+
+// The three features the map used to list now have markup, and the id is only
+// part of the contract: the copy-link button belongs in the move history
+// actions, the inspection timer in the timer display and carrying the class the
+// stylesheet animates, and the stats panel is filled by id but laid out as a
+// grid by class.
+test('the markup the source looks up is where the source expects it', () => {
+  const html = fs.readFileSync(path.join(SRC, '..', 'index.html'), 'utf8');
+
+  const history = blockFor(html, '<div class="history-actions"');
+  assert.match(history, /<button id="btn-copy-link"[^>]*>Copy Link<\/button>/);
+
+  const timer = blockFor(html, '<div class="timer-display"');
+  assert.match(timer, /<div id="inspection-timer" class="inspection-timer"[^>]*><\/div>/);
+
+  const stats = blockFor(html, '<div class="stats-panel"');
+  assert.match(stats, /<div id="speedcubing-stats" class="speedcubing-stats"[^>]*><\/div>/);
 });
 
 test('every this.x(...) call in the frontend source has a definition', () => {
