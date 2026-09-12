@@ -8,7 +8,8 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from helpers import base64_ambiguous_face, base64_face, base64_frame, solved_faces
+from helpers import (base64_ambiguous_face, base64_face, base64_frame,
+                     base64_framed_tiling, solved_faces)
 import main
 from main import app
 from validator import validate_facelet
@@ -254,6 +255,31 @@ def test_a_scan_of_a_cube_as_a_camera_sees_it_reads_every_sticker(client):
     body = response.json()
     assert body["state"] == "U" * 9 + "R" * 9 + "F" * 9 + "D" * 9 + "L" * 9 + "B" * 9
     assert body["confidence"] == 1.0
+
+
+def test_a_framed_tile_is_not_answered_with_a_cube_state(client):
+    # A tiled surface with a rectangle drawn round a 3x3 block of it: scenery
+    # with a four-sided outline in shot, which is what a window frame, a picture
+    # frame, a monitor bezel or a printed panel look like to the sampler. The
+    # crop taken from that outline skipped the continuation check, so the scan
+    # answered with a cube state for a picture of a wall - the complaint this
+    # work exists to remove, seen from the endpoint rather than the sampler.
+    response = client.post("/api/webcam-scan", json={"images": [base64_framed_tiling()] * 6})
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "No cube face was found in frame 1 (U)" in detail, detail
+    assert "frame 6 (B)" in detail, detail
+
+
+def test_the_frame_the_scan_refuses_is_the_one_the_overlay_refuses(client):
+    # The live overlay polls /api/detect-frame and the scan reads the same
+    # sampler, so the overlay must not light up green for the frame above.
+    response = client.post("/api/detect-frame", json={"image": base64_framed_tiling()})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["face_detected"] is False, body
+    assert body["colours"] == [None] * 9
+    assert body["confidence"] == 0.0
 
 
 def test_health_reports_the_service_and_the_solver(client):
