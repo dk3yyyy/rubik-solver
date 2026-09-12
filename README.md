@@ -60,8 +60,8 @@ This project is an interactive Rubik's cube solver web application. Users can sc
 └─────────────────────┘                         └─────────────────────┘
 ```
 
-- **Backend** — Python 3.11+, FastAPI, `python-kociemba` solver library, OpenCV for color detection
-- **Frontend** — React 18, Three.js (via `@react-three/fiber` + `@react-three/drei`), Vite, TypeScript
+- **Backend** — Python 3.11+, FastAPI, `rubik-solver-py` (Kociemba two-phase solver), OpenCV for colour detection
+- **Frontend** — vanilla JavaScript with Three.js (loaded from CDN) and Vite; no framework or build step beyond bundling
 - **Communication** — REST JSON over HTTP; no WebSocket or real-time channel required
 
 ---
@@ -77,6 +77,8 @@ This project is an interactive Rubik's cube solver web application. Users can sc
 | Browser    | Any modern browser with WebGL & `getUserMedia` support | Chrome, Firefox, Edge, Safari 16+ |
 
 > **Note for macOS / Linux users:** Ensure `python3` and `python3-venv` are installed. Some Linux distributions require `libgl1` for OpenCV (`sudo apt install libgl1`).
+
+> **Note on NumPy:** `requirements.txt` asks for `numpy>=2.1`. NumPy 1.26 has no wheels for Python 3.13 and later, and a source build on 3.14 corrupts the solver's pruning-table construction, so `init_solver()` fails and every solver endpoint answers `503`. If you must stay on Python 3.12 or older and pin NumPy yourself, the solver still needs 2.1 or newer.
 
 ---
 
@@ -112,7 +114,7 @@ npm install
 npm run dev
 ```
 
-The frontend dev server runs at `http://localhost:5173` by default. It proxies `/api` requests to the backend at `http://localhost:8000` (configured in `vite.config.ts`).
+The frontend dev server runs at `http://localhost:5173` by default. It proxies `/api` requests to the backend at `http://localhost:8000` (configured in `vite.config.js`), so the frontend talks to the backend on the same origin.
 
 ---
 
@@ -122,43 +124,55 @@ The frontend dev server runs at `http://localhost:5173` by default. It proxies `
 rubik-solver/
 ├── backend/
 │   ├── main.py                  # FastAPI app & route definitions
+│   ├── solver.py                # Kociemba solver wrapper and readiness checks
+│   ├── validator.py             # Facelet format and solvability validation
+│   ├── webcam.py                # OpenCV colour classification
 │   ├── requirements.txt         # Python dependencies
-│   ├── solver/
-│   │   ├── __init__.py
-│   │   ├── engine.py            # Kociemba solver wrapper
-│   │   ├── validator.py         # Cube-state validation logic
-│   │   └── scramble.py          # Scramble generator
-│   ├── webcam/
-│   │   ├── __init__.py
-│   │   └── color_detector.py    # OpenCV color classification
+│   ├── requirements-dev.txt     # Test dependencies
 │   └── tests/
+│       ├── test_api.py
 │       ├── test_solver.py
-│       ├── test_scramble.py
+│       ├── test_validator.py
 │       └── test_webcam.py
 │
 ├── frontend/
 │   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
+│   ├── vite.config.js
 │   ├── index.html
-│   └── src/
-│       ├── main.tsx             # React entry point
-│       ├── App.tsx              # Root component
-│       ├── components/
-│       │   ├── Cube.tsx         # Three.js cube renderer
-│       │   ├── Controls.tsx     # UI buttons (scramble, solve, step)
-│       │   └── CameraScan.tsx   # Webcam cube scanning UI
-│       ├── hooks/
-│       │   ├── useSolver.ts     # API client for /api/solve
-│       │   └── useWebcam.ts     # getUserMedia + frame capture
-│       ├── styles/
-│       │   └── App.css
-│       └── types/
-│           └── cube.ts          # TypeScript type definitions
+│   ├── src/
+│   │   ├── main.js              # App, Three.js renderer, UI wiring
+│   │   ├── cube-logic.js        # Move notation, facelet grid, optimiser
+│   │   └── styles.css
+│   └── test/
+│       ├── cube-logic.test.js
+│       └── facelets.json        # Expected facelets generated from the solver
 │
 ├── README.md
 └── .gitignore
 ```
+
+---
+
+## Testing
+
+### Backend
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest tests
+```
+
+Covers facelet validation, the solver wrapper, and the API contract. The first run builds the solver tables (a few seconds); later runs load them from `~/.cache/rubik_solver`.
+
+### Frontend
+
+```bash
+cd frontend
+npm test
+```
+
+Checks the move notation, the facelet-to-3D grid mapping, and the move optimiser against expected facelets generated from the Python solver, so the animated cube and the solution text can never disagree.
 
 ---
 
@@ -272,19 +286,23 @@ Returns a single move from the solution at a given step index (for step-by-step 
 
 ### POST `/api/webcam-scan`
 
-Accepts a base64-encoded image from the device camera and returns the detected cube state.
+Accepts base64-encoded face images from the device camera and returns the detected cube state. Send six images in U, R, F, D, L, B order for a full 54-sticker state, or one `image` per request while scanning face by face.
 
 **Request body:**
 
 ```json
 {
-  "image": "data:image/jpeg;base64,/9j/4AAQ..."
+  "images": [
+    "data:image/jpeg;base64,/9j/4AAQ...",
+    "data:image/jpeg;base64,/9j/4AAQ..."
+  ]
 }
 ```
 
-| Field    | Type     | Description                                              |
-|----------|----------|----------------------------------------------------------|
-| `image`  | `string` | Base64-encoded image (data URL or raw base64)            |
+| Field    | Type       | Description                                                |
+|----------|------------|------------------------------------------------------------|
+| `images` | `string[]` | One base64 image per face, in U, R, F, D, L, B order       |
+| `image`  | `string`   | A single base64 image, used when only one face is supplied  |
 
 **Response body:**
 
@@ -292,15 +310,17 @@ Accepts a base64-encoded image from the device camera and returns the detected c
 {
   "state": "DUUBULDBF...",
   "confidence": 0.94,
-  "face_colors": ["white", "red", "..."]
+  "face_colors": ["U", "R", "..."]
 }
 ```
 
-| Field          | Type      | Description                                            |
-|----------------|----------|--------------------------------------------------------|
-| `state`        | `string` | Detected 54-character cube state                       |
-| `confidence`   | `number` | Color-detection confidence score (0.0 – 1.0)          |
-| `face_colors`  | `string[]`| Per-sticker detected colors (54 elements)              |
+| Field          | Type       | Description                                            |
+|----------------|------------|--------------------------------------------------------|
+| `state`        | `string`   | Detected 54-character cube state                       |
+| `confidence`   | `number`   | Fraction of stickers classified, times detection confidence (0.0 – 1.0) |
+| `face_colors`  | `string[]` | Per-sticker detected facelet letters (54 elements)      |
+
+Returns `422` when a sticker cannot be classified or the detected state is not solvable, rather than guessing a colour.
 
 > **Tip:** For best detection results, hold the cube under even lighting and ensure each face fills the camera frame clearly. The detector works best when the cube face is perpendicular to the camera.
 
