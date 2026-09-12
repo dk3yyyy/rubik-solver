@@ -18,20 +18,76 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
+import logging
 import os
+import sys
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 import solver
 from validator import FORMAT, NUM_STICKERS, check_facelet, is_solved
+
+# ---------------------------------------------------------------------------
+# Structured logging
+# ---------------------------------------------------------------------------
+
+class StructuredFormatter(logging.Formatter):
+    """Emit log records as single-line JSON with a UTC timestamp.
+
+    Keeps the output machine-parseable (CloudWatch, Datadog, jq) while still
+    being readable in a terminal during local development.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0] is not None:
+            payload["exception"] = self.formatException(record.exc_info)
+        # Include any extra fields the caller attached via ``extra={...}``.
+        standard = {
+            "args", "asctime", "created", "exc_info", "exc_text", "filename",
+            "funcName", "levelname", "levelno", "lineno", "module", "msecs",
+            "message", "msg", "name", "pathname", "process", "processName",
+            "relativeCreated", "stack_info", "taskName", "thread", "threadName",
+        }
+        for key, value in record.__dict__.items():
+            if key not in standard and key not in payload:
+                # Only short primitives: a future extra={...} must not be able to
+                # drop a request body or a base64 image into the log line.
+                if isinstance(value, str):
+                    payload[key] = value if len(value) <= 200 else value[:197] + "..."
+                elif isinstance(value, (int, float, bool)) or value is None:
+                    payload[key] = value
+        # str(payload) is not JSON. It writes True and None in Python spelling, and
+        # an apostrophe inside a value ends up breaking the quoting.
+        return json.dumps(payload, default=str)
+
+
+def _configure_logging() -> None:
+    level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(StructuredFormatter())
+    logging.basicConfig(level=level, handlers=[handler], force=True)
+
+
+_configure_logging()
+logger = logging.getLogger("rubik.api")
 
 # One image per face, six faces on a cube.
 FACE_COUNT = 6
@@ -86,12 +142,26 @@ def _client_key(request: Request) -> str:
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app_instance: FastAPI):
     # Building the solver tables takes a few seconds on the first run and is
     # cached afterwards. A failure here leaves the solver unavailable and the
     # solver-backed endpoints respond with 503 rather than crashing the app.
+    logger.info("Starting up: initializing solver tables")
     solver.init()
+    logger.info("Startup complete: solver ready=%s", solver.is_ready())
+
+    # No signal handlers here. uvicorn installs its own for SIGTERM and SIGINT
+    # before this lifespan runs, and those are what reach this shutdown block;
+    # registering our own replaced them, so the process logged that it was
+    # shutting down and then kept serving until it was killed. It also broke the
+    # tests, because signal.signal() only works on the main thread and TestClient
+    # runs startup on a worker.
     yield
+
+    # Shutdown: drain in-flight requests, close resources.
+    logger.info("Shutting down: cleaning up resources")
+    _rate_limit_store.clear()
+    logger.info("Shutdown complete")
 
 
 app = FastAPI(title="Rubik's Cube Solver API", version="1.0.0", lifespan=lifespan)
@@ -118,6 +188,11 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+# GZip compresses responses >= 500 bytes. JSON responses (solve, scramble,
+# webcam-scan) compress well and the threshold avoids wasting cycles on tiny
+# responses like the health check.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Chrome refuses to let a public https page reach a loopback address such as
 # http://localhost:8000 unless the server opts in, which is what stops a
@@ -152,6 +227,10 @@ async def rate_limit_middleware(request: Request, call_next):
     if len(recent) >= RATE_LIMIT_MAX:
         _rate_limit_store[key] = recent
         retry_after = max(1, int(RATE_LIMIT_WINDOW - (now - recent[0])))
+        logger.warning(
+            "Rate limit exceeded",
+            extra={"client": key, "path": path, "retry_after": retry_after},
+        )
         return JSONResponse(
             status_code=429,
             content={"detail": f"Rate limit exceeded. Try again in {retry_after} seconds."},
@@ -293,7 +372,9 @@ async def health() -> dict[str, Any]:
     build: the app is up before it can solve, and a 200 here with
     solver_ready false is a starting service rather than a broken one.
     """
-    return {"status": "ok", "solver_ready": solver.is_ready(), "webcam_available": WEBCAM_AVAILABLE}
+    ready = solver.is_ready()
+    logger.info("Health check", extra={"solver_ready": ready, "webcam_available": WEBCAM_AVAILABLE})
+    return {"status": "ok", "solver_ready": ready, "webcam_available": WEBCAM_AVAILABLE}
 
 
 @app.get("/api/scramble", response_model=ScrambleResponse, tags=["cube"])
