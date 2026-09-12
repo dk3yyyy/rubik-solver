@@ -189,6 +189,17 @@ def _require_webcam() -> Any:
     return webcam
 
 
+@app.get("/api/health")
+async def health() -> dict[str, Any]:
+    """Liveness for a platform health check, and a quick manual look.
+
+    Reports the solver separately because the tables take a few seconds to
+    build: the app is up before it can solve, and a 200 here with
+    solver_ready false is a starting service rather than a broken one.
+    """
+    return {"status": "ok", "solver_ready": solver.is_ready(), "webcam_available": WEBCAM_AVAILABLE}
+
+
 @app.get("/api/scramble", response_model=ScrambleResponse)
 @app.post("/api/scramble", response_model=ScrambleResponse)
 async def get_scramble() -> ScrambleResponse:

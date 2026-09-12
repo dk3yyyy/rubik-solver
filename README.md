@@ -10,16 +10,19 @@ A full-stack web application that solves Rubik's cubes using a Three.js 3D front
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
 - [Setup](#setup)
+  - [Quick start: the whole app on one origin](#quick-start-the-whole-app-on-one-origin)
   - [Backend](#backend)
   - [Frontend](#frontend)
 - [Project Structure](#project-structure)
 - [API Documentation](#api-documentation)
+  - [GET /api/health](#get-apihealth)
   - [POST /api/scramble](#post-apiscramble)
   - [POST /api/solve](#post-apisolve)
   - [POST /api/step](#post-apistep)
   - [POST /api/webcam-scan](#post-apiwebcam-scan)
 - [Using the App](#using-the-app)
 - [Configuration](#configuration)
+- [Hosting](#hosting)
 - [Development](#development)
 - [Roadmap](#roadmap)
 - [License](#license)
@@ -210,6 +213,25 @@ Checks the move notation, the facelet-to-3D grid mapping, and the move optimiser
 ## API Documentation
 
 All endpoints accept and return `JSON`. The base URL is `http://localhost:8000`.
+
+### GET `/api/health`
+
+Liveness for a platform health check, and a quick manual look at a deployed
+service. Answers 200 as soon as the app is up, which is before the solver tables
+have finished building.
+
+**Response body:**
+```json
+{
+  "status": "ok",
+  "solver_ready": true,
+  "webcam_available": true
+}
+```
+| Field | Type | Description |
+| `status` | `string` | `"ok"` when the app is serving |
+| `solver_ready` | `boolean` | `false` while the solver tables are still building; solving returns 503 until it is `true` |
+| `webcam_available` | `boolean` | `false` when OpenCV is not installed, so scanning returns 503 |
 
 ### POST `/api/scramble`
 
@@ -404,6 +426,38 @@ a face at a time; a scan is loaded into the net so you can correct any sticker i
 | `WEBCAM_RESOLUTION`     | `1280x720`      | Requested webcam capture resolution        |
 
 Copy `.env.example` to `.env` in both `backend/` and `frontend/` to customize these values.
+
+---
+
+## Hosting
+
+The solver is Python, so a static host cannot run it. GitHub Pages, Cloudflare
+Pages and a static Vercel build can each serve `frontend/dist`, and each will
+render the cube, the guided entry and the playback controls. None of them can
+answer `/api/solve`, and a page served from a public origin is not allowed to
+call a backend running on the visitor's own machine, so a copy hosted that way
+cannot solve a cube and says so when you try.
+
+Hosting a working app needs somewhere that runs Python. `render.yaml` is set up
+for Render: choose **New**, then **Blueprint**, in the dashboard, point it at this
+repository, and Render installs the backend dependencies, builds the frontend and
+starts a single service that serves both. One service means one origin, which is
+why there is no `VITE_API_URL` to set and no CORS to arrange.
+
+Free plan services sleep when idle, so the first request after a quiet spell
+waits for a cold start plus the few seconds the solver tables need. `GET
+/api/health` reports both: it returns 200 as soon as the app is up, with
+`solver_ready` telling you whether solving will work yet.
+
+Anywhere that runs a Python process or a container works the same way: install
+`backend/requirements.txt`, run `npm ci && npm run build` in `frontend` so
+`frontend/dist` exists, then `cd backend && uvicorn main:app --host 0.0.0.0
+--port $PORT`.
+
+Cloudflare Workers and Vercel's Python functions are a poor fit rather than an
+impossible one: the solver builds its pruning tables at startup, which costs
+seconds and tens of megabytes, and that sits badly with a short-lived function.
+Workers cannot run this dependency set at all.
 
 ---
 
