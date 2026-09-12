@@ -378,6 +378,7 @@ class App {
     this.isPlaying = false;
     this.capturedFaces = [];
     this.timerDisplay = document.getElementById('timer');
+    this.timerInterval = null;
     this.statusEl = document.getElementById('status');
     this.moveCounterEl = document.getElementById('move-counter');
     this.scrambleDisplay = document.getElementById('history-scramble');
@@ -451,7 +452,7 @@ class App {
 
       this.timer.reset();
       this.timer.start();
-      this.updateTimerDisplay();
+      this.startTimerDisplay();
 
       this.history.setScramble(this.scrambleMoves);
       this.updateHistoryDisplay();
@@ -462,7 +463,7 @@ class App {
       this.faceletInput.value = data.state;
 
       this.timer.stop();
-      this.updateTimerDisplay();
+      this.stopTimerDisplay();
       this.moveCounterEl.textContent = `Scrambled: ${this.scrambleMoves.length} moves`;
       this.setStatus('Scrambled! Click "Solve" to find a solution.', 'success');
     } catch (err) {
@@ -508,17 +509,24 @@ class App {
     if (this.isPlaying || this.currentMoveIndex >= this.solution.length) return;
     this.isPlaying = true;
     this.timer.start();
-    this.updateTimerDisplay();
+    this.startTimerDisplay();
 
-    await this.cube.playSolution(this.solution.slice(this.currentMoveIndex));
-    this.currentMoveIndex = this.solution.length;
-    this.isPlaying = false;
+    // Checking isPlaying each step is what lets Pause stop playback instead of
+    // letting the whole solution play out.
+    while (this.isPlaying && this.currentMoveIndex < this.solution.length) {
+      const move = this.solution[this.currentMoveIndex];
+      this.currentMoveIndex += 1;
+      await this.cube.enqueue(move, true);
+      this.moveCounterEl.textContent = `Move ${this.currentMoveIndex}/${this.solution.length}`;
+    }
 
-    this.timer.stop();
-    this.updateTimerDisplay();
-    this.moveCounterEl.textContent = `Move ${this.currentMoveIndex}/${this.solution.length}`;
-    this.verifyRenderedState();
-    this.saveTime();
+    if (this.currentMoveIndex >= this.solution.length) {
+      this.isPlaying = false;
+      this.timer.stop();
+      this.stopTimerDisplay();
+      this.verifyRenderedState();
+      this.saveTime();
+    }
   }
 
   /**
@@ -537,9 +545,10 @@ class App {
   }
 
   pause() {
+    if (!this.isPlaying) return;
     this.isPlaying = false;
     this.timer.stop();
-    this.updateTimerDisplay();
+    this.stopTimerDisplay();
   }
 
   async next() {
@@ -571,7 +580,7 @@ class App {
     this.isPlaying = false;
     this.faceletInput.value = '';
     this.timer.reset();
-    this.updateTimerDisplay();
+    this.stopTimerDisplay();
     this.history.clear();
     this.updateHistoryDisplay();
     this.moveCounterEl.textContent = '0 moves';
@@ -681,8 +690,27 @@ class App {
     panel.hidden = true;
   }
 
-  updateTimerDisplay() {
+  /** One-shot render, used when the clock is not running. */
+  renderTimer() {
     this.timerDisplay.textContent = this.timer.formatTime(this.timer.getElapsed());
+  }
+
+  /**
+   * Tick the clock while it runs. The timer object only tracks elapsed time;
+   * without this the display would freeze as soon as the clock started.
+   */
+  startTimerDisplay() {
+    if (this.timerInterval) return;
+    this.renderTimer();
+    this.timerInterval = setInterval(() => this.renderTimer(), 50);
+  }
+
+  stopTimerDisplay() {
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
+    }
+    this.renderTimer();
   }
 
   updateHistoryDisplay() {
