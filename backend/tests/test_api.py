@@ -1,5 +1,7 @@
 """API contract tests for the FastAPI app."""
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -186,3 +188,49 @@ def test_detect_single_face_upload(client):
     body = response.json()
     assert body["facelet"] == "URFDLBURF"
     assert body["confidence"] == 1.0
+
+
+@pytest.mark.parametrize(
+    "request_header, response_header",
+    [
+        ("Access-Control-Request-Private-Network", "Access-Control-Allow-Private-Network"),
+        ("Access-Control-Request-Local-Network", "Access-Control-Allow-Local-Network"),
+    ],
+)
+def test_preflight_opts_in_to_local_network_access(client, request_header, response_header):
+    # Chrome blocks a public https page from reaching a loopback address such as
+    # http://localhost:8000 unless the server answers the opt-in preflight.
+    # Without this the deployed GitHub Pages copy cannot solve anything.
+    response = client.options(
+        "/api/solve",
+        headers={
+            "Origin": "https://dk3yyyy.github.io",
+            "Access-Control-Request-Method": "POST",
+            request_header: "true",
+        },
+    )
+    assert response.status_code in (200, 204)
+    assert response.headers.get(response_header) == "true"
+
+
+def test_preflight_without_the_opt_in_never_advertises_it(client):
+    response = client.options(
+        "/api/solve",
+        headers={"Origin": "https://example.com", "Access-Control-Request-Method": "POST"},
+    )
+    assert "access-control-allow-private-network" not in response.headers
+    assert "access-control-allow-local-network" not in response.headers
+
+
+def test_api_routes_keep_precedence_when_the_ui_is_mounted(client):
+    # frontend/dist is mounted at "/" when it has been built, so the same origin
+    # serves the app and the API. The API routes must still win.
+    assert len(scrambled_state(client)) == 54
+
+    dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if not dist.is_dir():
+        pytest.skip("frontend not built, so the UI mount is inactive")
+
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]

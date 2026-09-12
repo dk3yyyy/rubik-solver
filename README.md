@@ -86,6 +86,34 @@ This project is an interactive Rubik's cube solver web application. Users can sc
 
 ## Setup
 
+### Quick start: the whole app on one origin
+
+The backend serves the built frontend when `frontend/dist` exists, so a single
+command runs everything:
+
+```bash
+cd frontend
+npm install
+npm run build          # once, and again after any frontend change
+
+cd ../backend
+python3 -m venv venv
+source venv/bin/activate      # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Then open **http://localhost:8000**. The page and the API share an origin, so
+there is no proxy, no `VITE_API_URL` and nothing cross-origin to get wrong. This
+is the way to run the app for real; keep reading only if you also want hot reload
+while editing the frontend.
+
+> Hosting the frontend somewhere else does not work as a way to solve cubes.
+> Browsers block a page served from a public origin from calling a backend on
+> your own machine (Chrome reports `LocalNetworkAccessPermissionDenied`), and the
+> server cannot opt out of that. The public copy of this app is a demo of the
+> interface; solving needs the backend above.
+
 ### Backend
 
 ```bash
@@ -333,7 +361,7 @@ Returns `422` when a sticker cannot be classified or the detected state is not s
 
 The usual flow is to type in the cube you are holding, then follow the solution on screen.
 
-1. **Open the app** at `http://localhost:5173` with the backend running.
+1. **Open the app** at `http://localhost:8000` with the backend running (or `http://localhost:5173` if you are running the Vite dev server).
 2. **Enter your cube** — in the **Enter your cube** section, hold the physical cube white on top and
    green facing you. Pick a colour, then tap the stickers that match it on the six-face net. The
    centre stickers are fixed because they define the colours. The 3D cube above updates as you go.
@@ -371,7 +399,7 @@ a face at a time; a scan is loaded into the net so you can correct any sticker i
 |-------------------------|-----------------|--------------------------------------------|
 | `BACKEND_HOST`          | `0.0.0.0`       | Host the backend binds to                  |
 | `BACKEND_PORT`          | `8000`          | Port the backend listens on                |
-| `VITE_API_URL`          | `http://localhost:8000` | API base URL used by the frontend  |
+| `VITE_API_URL`          | *(empty, same origin)* | API base URL used by the frontend  |
 | `SOLVER_MAX_MOVES`      | `22`            | Upper bound on solution length             |
 | `WEBCAM_RESOLUTION`     | `1280x720`      | Requested webcam capture resolution        |
 

@@ -28,6 +28,7 @@ import {
   formatMove,
   invertMove,
   invertSequence,
+  isLocalOrigin,
   moveToRotation,
   normalFromEuler,
   optimizeMoves,
@@ -228,19 +229,37 @@ test('an unfilled picker produces a facelet the solver will reject', () => {
 });
 
 test('a network failure says the backend is not running', () => {
-  const message = describeApiError(new TypeError('Failed to fetch'), 'http://localhost:8000');
+  const message = describeApiError(new TypeError('Failed to fetch'), 'http://localhost:8000', 'http://localhost:5173');
   assert.ok(message.includes('Cannot reach the solver backend at http://localhost:8000'), message);
   assert.ok(message.includes('uvicorn main:app'), message);
 });
 
 test('a network failure without a known address still explains the fix', () => {
-  const message = describeApiError(new TypeError('Failed to fetch'));
+  const message = describeApiError(new TypeError('Failed to fetch'), null, 'http://127.0.0.1:8000');
   assert.ok(message.includes('on this address'), message);
   assert.ok(message.includes('backend'), message);
 });
 
+test('a hosted page is told browsers block it, not to start the backend', () => {
+  // Telling someone on the GitHub Pages copy to start a backend would be wrong:
+  // Chrome denies a public page access to loopback whatever the server sends.
+  const message = describeApiError(new TypeError('Failed to fetch'), 'http://localhost:8000', 'https://dk3yyyy.github.io');
+  assert.ok(message.includes('hosted copy cannot reach'), message);
+  assert.ok(message.includes('http://localhost:8000'), message);
+  assert.ok(message.includes('browsers block'), message);
+});
+
+test('isLocalOrigin recognises the local addresses', () => {
+  for (const origin of ['http://localhost:8000', 'http://127.0.0.1:5173', 'https://localhost', 'http://[::1]:8000']) {
+    assert.ok(isLocalOrigin(origin), origin);
+  }
+  for (const origin of ['https://dk3yyyy.github.io', 'https://example.com', '', null]) {
+    assert.ok(!isLocalOrigin(origin), String(origin));
+  }
+});
+
 test('solver errors are passed through unchanged', () => {
   const original = new Error('No solution found within 22 moves');
-  assert.equal(describeApiError(original, 'http://localhost:8000'), original.message);
+  assert.equal(describeApiError(original, 'http://localhost:8000', 'http://localhost:5173'), original.message);
   assert.equal(describeApiError('something odd'), 'something odd');
 });
