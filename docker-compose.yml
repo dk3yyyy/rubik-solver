@@ -1,0 +1,14 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ALLOWED_ORIGINS=*
+      - TRUST_PROXY=true
+      # Set to 0 to disable the per-client rate limiter.
+      - RATE_LIMIT_MAX=60
+      - RATE_LIMIT_WINDOW=60
+    restart: unless-stopped
