@@ -18,7 +18,16 @@ import pytest
 import webcam
 from helpers import (jpeg_roundtrip, make_face_image, make_frame,
                      make_framed_tiling_frame)
-from webcam import analyse_face, detect_face_colors
+from webcam import (
+    GRID_SCALES,
+    MIN_INTERNAL_LINES,
+    _crop_stats,
+    _rotated,
+    _square_at,
+    _working_frame,
+    analyse_face,
+    detect_face_colors,
+)
 
 # A scrambled face: unlike a solid colour, a crop that lands in the wrong place
 # shows up as the wrong letters.
@@ -220,6 +229,71 @@ def test_a_cube_too_close_to_read_is_not_turned_into_one_sticker(coverage):
     result = analyse_face(frame)
     if result["found"]:
         assert result["colours"] == SCRAMBLED, (coverage, result["colours"])
+
+
+def test_one_sticker_and_its_plastic_ring_is_not_read_as_a_whole_face():
+    # A face filling 82% of the frame, tilted 21 degrees, on a cube whose
+    # stickers have plastic on all four of their sides. The sampler answered
+    # "L L L L L L L L L" at confidence 1.0 from a 134 px window: one sticker of
+    # the middle of the face plus the plastic ring around it. All nine of that
+    # window's cells sat inside the one sticker, and the ring's outer edge
+    # crossed the ends of the four boundary strips, so the boundary count read
+    # 4 of 4 and the flatness check 9 of 9. Nine Ls is a plausible cube state,
+    # which is what made it dangerous: the frame has to be read from the face
+    # or refused, never from one of its stickers.
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=0.82, angle=21, ring=True))
+    result = analyse_face(frame)
+    assert result["found"], result["reason"]
+    assert result["colours"] == SCRAMBLED, result["colours"]
+    # The window that used to win covered a quarter of the frame; the face
+    # covers most of it.
+    assert result["coverage"] > 0.5, result["coverage"]
+
+
+def test_the_plastic_ring_around_one_sticker_is_not_a_sticker_boundary():
+    # Where that is enforced: `_internal_lines` in backend/webcam.py counts a
+    # boundary when the plastic covers LINE_DARK_SHARE of the crossing strip,
+    # not when the strip's darkest pixel is the plastic. The ring *around* a
+    # sticker crosses the end of every strip without running across any of
+    # them, so a crop of one sticker plus its ring - which reads nine identical
+    # letters, because all nine cells are inside the one sticker - has no
+    # boundaries between its cells and cannot be a face, however plausible its
+    # nine letters look.
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=0.82, angle=21, ring=True))
+    work = _working_frame(frame)
+    short = float(min(work.shape[:2]))
+    # The window the search used to accept: the smallest square of its own
+    # coarse grid, sampled at the small rotations it tries around the sticker
+    # it found. The face is centred on the frame, so that window sits on the
+    # face's middle sticker - SCRAMBLED's middle sticker is L - and all nine of
+    # its cell samples land inside that one sticker. If a crop like this is ever
+    # read as a face, the nine Ls that come back are one sticker nine times.
+    for angle in (20.4, 21.0, 21.4):
+        crop = _square_at(_rotated(work, angle), work.shape[1] / 2.0, work.shape[0] / 2.0,
+                          short * GRID_SCALES[0])
+        assert crop is not None
+        stats = _crop_stats(crop)
+        assert stats["colours"] == ["L"] * 9, (angle, stats["colours"])
+        assert stats["lines"] < MIN_INTERNAL_LINES, (
+            f"at {angle} degrees the ring around one sticker counted as "
+            f"{stats['lines']} boundaries")
+
+
+@pytest.mark.parametrize("gap, coverage, angle", [
+    (4, 0.80, 18), (4, 0.80, 21), (4, 0.82, 18),
+    (5, 0.80, 21), (5, 0.82, 18), (5, 0.82, 24),
+])
+def test_a_tilted_face_is_read_from_the_face_not_from_one_of_its_stickers(gap, coverage, angle):
+    # The same defect a size or a degree either side of the frame above: every
+    # one of these came back as nine identical letters before, with the plastic
+    # ring landing on the crop's own thirds. A neighbour of it (a 4 px ring at
+    # coverage 0.82) still misreads, from a magnified crop of part of the face
+    # rather than from one sticker; that is a separate defect, not this one.
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=coverage, angle=angle,
+                                      gap=gap, ring=True))
+    result = analyse_face(frame)
+    assert result["found"], (gap, coverage, angle, result["reason"])
+    assert result["colours"] == SCRAMBLED, (gap, coverage, angle, result["colours"])
 
 
 def _tiled_frame(tile=80, grout=5, colour=(200, 220, 230), frame_size=(480, 640)):

@@ -113,6 +113,16 @@ FLAT_SPREAD_MAX = 40
 MIN_INTERNAL_LINES = 3
 LINE_DARK_DROP = 22.0
 LINE_COLOUR_GAP = 38.0
+# A boundary between two stickers is a *line*: the plastic runs the width of the
+# strip it is measured in, edge to edge. Testing the strip's darkest single
+# pixel for the plastic test is not the same thing - one dark pixel at the end
+# of a strip is an edge crossing it, not a line through it - and that is how a
+# crop of one sticker plus its plastic ring was accepted as a whole face: the
+# ring's outer edge crosses the ends of all four boundary strips, so every strip
+# contained a dark pixel and the boundary count read 4 of 4 while all nine cells
+# sat inside the one sticker. The plastic has to cover a share of the strip for
+# the crossing to be a boundary, which is the check that rejects that crop.
+LINE_DARK_SHARE = 0.4
 # How much a probe band's colour has to vary inside itself before it can be the
 # next cell of the pattern rather than a plain surface of the same colour. A
 # cell of a continuing pattern shows its own boundary - the plastic between
@@ -246,6 +256,11 @@ def _internal_lines(bgr: np.ndarray, value: np.ndarray, means: np.ndarray,
     one of those two things. Both cells at a crossing have to be uniform for it
     to count: a cell that is itself a mixture is a sign the crop is misaligned,
     and then "the pixels either side differ" says nothing about the face.
+
+    The plastic test asks for a share of the crossing strip to be near-black,
+    not for its darkest pixel: the plastic line is only a boundary if it runs
+    across the strip, and a single dark pixel is an edge crossing the strip
+    rather than a line through it. See ``LINE_DARK_SHARE``.
     """
     cell = GRID_SAMPLE // 3
     pad = cell // 4
@@ -272,7 +287,9 @@ def _internal_lines(bgr: np.ndarray, value: np.ndarray, means: np.ndarray,
                     left_flat, right_flat = uniform[(line - 1) * 3 + k], uniform[line * 3 + k]
                 if strip.size == 0 or not (left_flat and right_flat):
                     continue
-                darker = float(strip.min()) <= min(left_v, right_v) - LINE_DARK_DROP
+                threshold = min(left_v, right_v) - LINE_DARK_DROP
+                dark_share = float(np.count_nonzero(strip <= threshold)) / strip.size
+                darker = dark_share >= LINE_DARK_SHARE
                 changed = float(np.abs(left - right).max()) >= LINE_COLOUR_GAP
                 if darker or changed:
                     hits += 1

@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- A crop of one sticker is not read as a whole face. The boundary between two
+  stickers is tested by asking how much of the crossing strip the plastic
+  covers, not by asking whether the strip contains a dark pixel: on a face
+  filling 82% of the frame at a 21 degree tilt the plastic ring *around* the
+  middle sticker crossed the end of all four boundary strips, so the count read
+  4 of 4, the flatness check 9 of 9, and the sampler answered "L L L L L L L L L"
+  at confidence 1.0 from a 134 px window holding one sticker - a plausible cube
+  state read off a quarter of the frame. A boundary now has to run across the
+  strip it is measured in.
 - A scanned frame is read from the cube in front of the camera. The sampler took
   the bounding box of the largest four-sided contour and, finding none, fell back
   to the whole picture, so on a real frame the nine "stickers" were patches of
