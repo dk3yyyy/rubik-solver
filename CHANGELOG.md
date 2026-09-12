@@ -46,7 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anything four-sided was drawn round a 3x3 block of it: a window frame, a
   picture frame, a monitor bezel or a printed panel all hand the search the
   same outline a real face does. A quad says where the crop is, not that what
-  it holds is a cube face.
+  it holds is a cube face. A cube held against a white wall is still read: the
+  probe on a quadrilateral's rect asks the band beyond the crop for the next
+  cell's boundary as well as its colour, which is what tells a wall the stickers
+  match from a tiling that carries on (checked against 160 real frames, no frame
+  the sampler used to read is refused now).
 - The copy-link button, the inspection timer and the ao5/ao12 stats panel have
   the markup `main.js` has always looked up. `#btn-copy-link`,
   `#inspection-timer` and `#speedcubing-stats` arrived with the deep-link work
