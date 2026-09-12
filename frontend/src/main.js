@@ -15,6 +15,7 @@ import {
   readApiResponse,
 } from './cube-logic.js';
 import { CubeInput } from './cube-input.js';
+import { SpeedcubingStats } from './speedcubing-stats.js';
 
 // Three.js wants integer colours; the picker and the cube share one palette.
 const COLORS = Object.fromEntries(
@@ -402,25 +403,20 @@ class App {
     this.predictionTimer = null;
     this.lastMirrored = null;
     this.solvedInputFacelet = null;
+    this.stats = new SpeedcubingStats();
+    this.inspectionActive = false;
+    this.inspectionTimeLeft = 0;
+    this.inspectionInterval = null;
+    this.inspectionTimeout = null;
+    this.solveStartTime = null;
+    this.manualMoveStack = [];
+    this.movePreviewEl = null;
+    this.movePreviewMovesEl = null;
 
     this.init();
   }
 
-  init() {
-    const container = document.getElementById('cube-canvas');
-    this.cube = new Cube3D(container);
-    this.cube.setMoveDuration(Number(this.speedSlider.value));
-    this.cubeInput = new CubeInput(
-      document.getElementById('cube-net'),
-      document.getElementById('cube-palette'),
-      { onChange: (state, meta) => this.onInputChange(state, meta) },
-    );
-    this.bindEvents();
-    this.updateSpeedLabel();
-    this.updateBestTimesDisplay();
-    this.updateInputStatus(this.cubeInput.getState());
-    this.setStatus('Fill in your cube below, or press Scramble to try a random one.', 'info');
-  }
+
 
   bindEvents() {
     document.getElementById('btn-scramble').addEventListener('click', () => this.scramble());
@@ -439,6 +435,8 @@ class App {
     document.getElementById('btn-optimize').addEventListener('click', () => this.optimizeSolution());
     document.getElementById('btn-clear-history').addEventListener('click', () => this.clearHistory());
     document.getElementById('btn-clear-times').addEventListener('click', () => this.clearBestTimes());
+    const copyLinkBtn = document.getElementById('btn-copy-link');
+    if (copyLinkBtn) copyLinkBtn.addEventListener('click', () => this.copyLink());
     document.getElementById('btn-input-solve').addEventListener('click', () => this.solve());
     document.getElementById('btn-input-clear').addEventListener('click', () => this.clearInput());
 
@@ -462,6 +460,18 @@ class App {
       if (e.key === 'Enter') {
         e.preventDefault();
         this.solve();
+        return;
+      }
+      // Space starts/ends inspection, like a stackmat timer.
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (this.inspectionActive) {
+          this.endInspection();
+          this.timer.start();
+          this.startTimerDisplay();
+        } else if (!this.timer.running && this.timer.elapsed === 0 && this.scrambleMoves.length > 0) {
+          this.ensureTimerRunning();
+        }
         return;
       }
       if (e.key === 's' || e.key === 'S') {
@@ -497,7 +507,8 @@ class App {
       this.currentMoveIndex = 0;
 
       this.timer.reset();
-      this.startTimerDisplay();
+      this.endInspection();
+      this.stopTimerDisplay();
 
       this.history.setScramble(this.scrambleMoves);
       // The scramble replaces the cube, so a solution for the previous one is no
@@ -519,15 +530,19 @@ class App {
   }
 
   /**
-   * Start the timer on first user input — not during scramble animation.
+   * Start inspection before the solve timer begins on first user input.
    * The timer should measure how long the user takes to solve, not how
    * long the scramble animation plays out.
    */
   ensureTimerRunning() {
-    if (!this.timer.running && this.timer.elapsed === 0) {
+    if (this.timer.running || this.timer.elapsed > 0) return;
+    if (this.inspectionActive) return;
+    this.startInspection();
+    // When inspection ends, start the timer.
+    this.inspectionTimeout = setTimeout(() => {
       this.timer.start();
       this.startTimerDisplay();
-    }
+    }, 15000);
   }
 
   async solve() {
@@ -782,6 +797,7 @@ class App {
     this.lastMirrored = null;
     this.faceletInput.value = '';
     this.timer.reset();
+    this.endInspection();
     this.stopTimerDisplay();
     this.history.clear();
     this.updateHistoryDisplay();
@@ -976,6 +992,74 @@ class App {
       .catch(() => this.setStatus('Copy failed', 'error'));
   }
 
+  /** Copy a deep link with the current facelet to the clipboard. */
+  copyLink() {
+    const facelet = this.currentFacelet || SOLVED_FACELET;
+    const url = new URL(window.location.href);
+    url.searchParams.set('s', facelet);
+    navigator.clipboard.writeText(url.toString())
+      .then(() => this.setStatus('Link copied!', 'success'))
+      .catch(() => this.setStatus('Copy failed', 'error'));
+  }
+
+  /** Load facelet from ?s= URL parameter on page load. */
+  loadDeepLink() {
+    const params = new URLSearchParams(window.location.search);
+    const facelet = params.get('s');
+    if (!facelet) return;
+    if (facelet.length !== STICKER_TOTAL) {
+      this.setStatus(`Invalid facelet in URL: expected ${STICKER_TOTAL} chars`, 'error');
+      return;
+    }
+    this.faceletInput.value = facelet;
+    this.loadFacelet();
+  }
+
+  /** Start the 15s inspection countdown before the solve timer begins. */
+  startInspection() {
+    if (this.inspectionActive) return;
+    this.inspectionActive = true;
+    this.inspectionTimeLeft = 15000;
+    this.updateInspectionDisplay();
+    this.inspectionInterval = setInterval(() => {
+      this.inspectionTimeLeft -= 100;
+      if (this.inspectionTimeLeft <= 0) {
+        this.inspectionTimeLeft = 0;
+        this.endInspection();
+        this.setStatus('Inspection over — timer running!', 'info');
+      }
+      this.updateInspectionDisplay();
+    }, 100);
+  }
+
+  endInspection() {
+    this.inspectionActive = false;
+    if (this.inspectionInterval) {
+      clearInterval(this.inspectionInterval);
+      this.inspectionInterval = null;
+    }
+    if (this.inspectionTimeout) {
+      clearTimeout(this.inspectionTimeout);
+      this.inspectionTimeout = null;
+    }
+    this.inspectionTimeLeft = 0;
+    this.updateInspectionDisplay();
+  }
+
+  updateInspectionDisplay() {
+    const el = document.getElementById('inspection-timer');
+    if (!el) return;
+    if (!this.inspectionActive) {
+      el.textContent = '';
+      el.classList.remove('active', 'warning');
+      return;
+    }
+    el.classList.add('active');
+    el.classList.toggle('warning', this.inspectionTimeLeft <= 3000);
+    const sec = Math.ceil(this.inspectionTimeLeft / 1000);
+    el.textContent = `Inspection: ${sec}s`;
+  }
+
   invertScramble() {
     if (this.history.scramble.length === 0) { this.setStatus('No scramble', 'error'); return; }
     const inverted = this.history.scramble.slice().reverse().map(invertMove);
@@ -1007,7 +1091,39 @@ class App {
     times.push({ time: elapsed, date: Date.now() });
     times.sort((a, b) => a.time - b.time);
     localStorage.setItem('rubik-best-times', JSON.stringify(times.slice(0, 10)));
+    this.stats.addTime(elapsed);
     this.updateBestTimesDisplay();
+    this.updateStatsDisplay();
+  }
+
+  updateStatsDisplay() {
+    const statsEl = document.getElementById('speedcubing-stats');
+    if (!statsEl) return;
+    const ao5 = this.stats.getAo5();
+    const ao12 = this.stats.getAo12();
+    const mo3 = this.stats.getMo3();
+    const count = this.stats.getCount();
+
+    statsEl.innerHTML = '';
+    const items = [
+      { label: 'ao5', value: ao5, desc: 'Average of 5' },
+      { label: 'ao12', value: ao12, desc: 'Average of 12' },
+      { label: 'mo3', value: mo3, desc: 'Mean of 3' },
+      { label: 'solves', value: count, desc: 'Total solves' },
+    ];
+    items.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'stat-item';
+      const label = document.createElement('span');
+      label.className = 'stat-label';
+      label.textContent = item.label;
+      const val = document.createElement('span');
+      val.className = 'stat-value';
+      val.textContent = item.label === 'solves' ? String(item.value) : this.stats.formatTime(item.value);
+      div.appendChild(label);
+      div.appendChild(val);
+      statsEl.appendChild(div);
+    });
   }
 
   updateBestTimesDisplay() {
@@ -1023,7 +1139,9 @@ class App {
 
   clearBestTimes() {
     localStorage.removeItem('rubik-best-times');
+    this.stats.clear();
     this.updateBestTimesDisplay();
+    this.updateStatsDisplay();
     this.setStatus('Times cleared', 'info');
   }
 
