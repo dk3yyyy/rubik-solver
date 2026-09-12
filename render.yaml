@@ -24,3 +24,8 @@ services:
       # source builds.
       - key: PYTHON_VERSION
         value: "3.12.7"
+      # Render terminates TLS in front of the app, so every request arrives from
+      # Render's proxy. Without this the rate limiter would count all callers as
+      # one client and throttle them collectively.
+      - key: TRUST_PROXY
+        value: "true"

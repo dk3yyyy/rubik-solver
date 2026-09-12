@@ -433,6 +433,10 @@ a face at a time; a scan is loaded into the net so you can correct any sticker i
 |-------------------------|-----------------|--------------------------------------------|
 | `BACKEND_HOST`          | `0.0.0.0`       | Host the backend binds to                  |
 | `BACKEND_PORT`          | `8000`          | Port the backend listens on                |
+| `ALLOWED_ORIGINS`       | `*`             | Comma separated list of origins allowed by CORS |
+| `RATE_LIMIT_MAX`        | `60`            | Requests per client per window; `0` disables the limiter |
+| `RATE_LIMIT_WINDOW`     | `60`            | Length of that window in seconds           |
+| `TRUST_PROXY`           | *(unset)*       | Set to `true` behind a proxy so the limiter keys on the client, not the proxy |
 | `VITE_API_URL`          | *(empty, same origin)* | API base URL used by the frontend  |
 | `SOLVER_MAX_MOVES`      | `22`            | Upper bound on solution length             |
 | `WEBCAM_RESOLUTION`     | `1280x720`      | Requested webcam capture resolution        |

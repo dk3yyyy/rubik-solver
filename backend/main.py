@@ -19,12 +19,14 @@ from __future__ import annotations
 import base64
 import binascii
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
@@ -42,6 +44,39 @@ except ImportError:  # pragma: no cover - OpenCV not installed
     webcam = None  # type: ignore[assignment]
     WEBCAM_AVAILABLE = False
 
+# Rate limiting. The default suits one person entering a cube: filling the net in
+# and correcting a scanned cube each trigger a solve every time the cube becomes
+# complete, so a limit that sounds generous per request still has to survive a
+# burst of edits. Set RATE_LIMIT_MAX=0 to turn the limiter off.
+RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "60"))
+RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))
+
+# The platform's health check must never be throttled: a 429 there reads as a
+# dead service, so the deploy gets replaced. It is the supervisor, not a caller.
+RATE_LIMIT_EXEMPT_PATHS = ("/api/health",)
+
+# Only trust X-Forwarded-For when the app is genuinely behind a proxy that sets
+# it. Trusting it unconditionally lets any caller choose its own bucket and walk
+# past the limit. Without it, a proxied deployment counts the proxy for everyone.
+TRUST_PROXY = os.environ.get("TRUST_PROXY", "").strip().lower() in {"1", "true", "yes"}
+
+# Buckets are pruned past this many clients, so the store cannot grow without
+# bound on one entry per address that ever called.
+_RATE_LIMIT_MAX_KEYS = 4096
+
+# client key -> request timestamps inside the window
+_rate_limit_store: dict[str, list[float]] = {}
+
+
+def _client_key(request: Request) -> str:
+    if TRUST_PROXY:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            # The nearest hop is the one a trusted proxy appended; entries to its
+            # left could have been supplied by the caller.
+            return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -54,14 +89,27 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Rubik's Cube Solver API", version="1.0.0", lifespan=lifespan)
 
+
+def _allowed_origins() -> list[str]:
+    """ALLOWED_ORIGINS is a comma separated list, "*" by default.
+
+    Splitting matters: putting the raw value straight into the list makes
+    "https://a.example,https://b.example" a single origin that matches nothing,
+    which looks like it works and silently does not.
+    """
+    raw = os.environ.get("ALLOWED_ORIGINS", "*")
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or ["*"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins(),
     # Wildcard origins and credentials are mutually exclusive per the CORS spec;
     # this API is unauthenticated so credentials are not needed.
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 # Chrome refuses to let a public https page reach a loopback address such as
@@ -73,6 +121,47 @@ _LOCAL_NETWORK_OPT_IN = {
     "access-control-request-private-network": "Access-Control-Allow-Private-Network",
     "access-control-request-local-network": "Access-Control-Allow-Local-Network",
 }
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Cap requests per client so one caller cannot occupy the solver.
+
+    The solver is CPU bound and its tables are built once per process, so a
+    scripted loop over /api/solve is enough to starve every other caller.
+    """
+    path = request.url.path
+    if (
+        RATE_LIMIT_MAX <= 0
+        or not path.startswith("/api/")
+        or path.startswith(RATE_LIMIT_EXEMPT_PATHS)
+    ):
+        return await call_next(request)
+
+    key = _client_key(request)
+    now = time.time()
+    recent = [t for t in _rate_limit_store.get(key, []) if now - t < RATE_LIMIT_WINDOW]
+
+    if len(recent) >= RATE_LIMIT_MAX:
+        _rate_limit_store[key] = recent
+        retry_after = max(1, int(RATE_LIMIT_WINDOW - (now - recent[0])))
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Rate limit exceeded. Try again in {retry_after} seconds."},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    recent.append(now)
+    _rate_limit_store[key] = recent
+
+    # Drop buckets whose window has drained rather than hold one per address that
+    # ever made a request.
+    if len(_rate_limit_store) > _RATE_LIMIT_MAX_KEYS:
+        for stale_key, stamps in list(_rate_limit_store.items()):
+            if not stamps or now - stamps[-1] > RATE_LIMIT_WINDOW:
+                del _rate_limit_store[stale_key]
+
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -293,6 +382,14 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
             detail=f"At most {FACE_COUNT} face images are accepted (got {len(payloads)})",
         )
 
+    # Validate payload sizes before decoding
+    for payload in payloads:
+        if len(payload) > 2 * 1024 * 1024:  # ~2MB base64 limit
+            raise HTTPException(
+                status_code=413,
+                detail=f"Image payload too large (max ~2 MB base64)"
+            )
+
     face_colors: List[Optional[str]] = []
     scores: List[float] = []
     for payload in payloads:
@@ -333,8 +430,13 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
 async def detect_single_face(file: UploadFile = File(...)) -> DetectResponse:
     """Detect the nine stickers of a single uploaded face image."""
     detector = _require_webcam()
-
-    colors, confidence = detector.detect_face_colors(await file.read())
+    
+    # Limit file size to 5 MB
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum 5 MB.")
+    
+    colors, confidence = detector.detect_face_colors(content)
     if any(color is None for color in colors):
         raise HTTPException(status_code=422, detail="Could not classify every sticker on this face")
     return DetectResponse(
