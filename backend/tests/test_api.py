@@ -205,6 +205,17 @@ def test_render_blueprint_matches_how_the_app_is_actually_run():
         assert (root / path).is_file(), path
 
 
+def test_unknown_api_paths_answer_json_not_the_static_handler(client):
+    # The built frontend is mounted at "/", so without an explicit fallback an
+    # API miss would be answered by the static handler with HTML, which a JSON
+    # client cannot tell apart from the backend being absent.
+    for method, path in (("get", "/api/nope"), ("get", "/api/solve"), ("post", "/api/nope")):
+        response = getattr(client, method)(path)
+        assert response.status_code == 404, (method, path)
+        assert response.headers["content-type"].startswith("application/json"), (method, path)
+        assert "No such endpoint" in response.json()["detail"], (method, path)
+
+
 def test_detect_single_face_upload(client):
     from helpers import jpeg_bytes, make_face_image
 

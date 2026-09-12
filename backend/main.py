@@ -343,6 +343,19 @@ async def detect_single_face(file: UploadFile = File(...)) -> DetectResponse:
     )
 
 
+# Keep /api answers JSON. The frontend is mounted at "/" below, which would
+# otherwise answer a mistyped or wrong-method API path with the static file
+# handler's HTML 404, and a JSON client cannot tell that apart from the backend
+# being absent. Declared after the real routes so those still win.
+@app.api_route(
+    "/api/{rest:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    include_in_schema=False,
+)
+async def unknown_api_path(rest: str) -> Any:
+    raise HTTPException(status_code=404, detail=f"No such endpoint: /api/{rest}")
+
+
 # Serve the built frontend from this same origin when it exists, so
 # `uvicorn main:app` and http://localhost:8000 is the whole app: one process,
 # one URL, no proxy and no cross-origin rules to satisfy. Mounted last so the
