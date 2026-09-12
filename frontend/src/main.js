@@ -472,6 +472,7 @@ class App {
       const map = { 'u': "U'", 'U': 'U', 'd': "D'", 'D': 'D', 'l': "L'", 'L': 'L', 'r': "R'", 'R': 'R', 'f': "F'", 'F': 'F', 'b': "B'", 'B': 'B' };
       if (map[e.key]) {
         e.preventDefault();
+        this.ensureTimerRunning();
         this.cube.enqueue(map[e.key], true);
         this.history.addMove(map[e.key]);
         this.updateHistoryDisplay();
@@ -496,7 +497,6 @@ class App {
       this.currentMoveIndex = 0;
 
       this.timer.reset();
-      this.timer.start();
       this.startTimerDisplay();
 
       this.history.setScramble(this.scrambleMoves);
@@ -511,12 +511,22 @@ class App {
       this.solvedInputFacelet = null;
       this.cubeInput.setFacelet(data.state);
 
-      this.timer.stop();
-      this.stopTimerDisplay();
       this.moveCounterEl.textContent = `Scrambled: ${this.scrambleMoves.length} moves`;
       this.setStatus('Scrambled! Click "Solve" to find a solution.', 'success');
     } catch (err) {
       this.setStatus(this.apiError(err), 'error');
+    }
+  }
+
+  /**
+   * Start the timer on first user input — not during scramble animation.
+   * The timer should measure how long the user takes to solve, not how
+   * long the scramble animation plays out.
+   */
+  ensureTimerRunning() {
+    if (!this.timer.running && this.timer.elapsed === 0) {
+      this.timer.start();
+      this.startTimerDisplay();
     }
   }
 
