@@ -6,6 +6,7 @@ import {
   FACE_COLOURS,
   FACE_NORMALS,
   STICKER_PLACEMENTS,
+  describeApiError,
   invertMove,
   moveToRotation,
   optimizeMoves,
@@ -511,7 +512,7 @@ class App {
       this.moveCounterEl.textContent = `Scrambled: ${this.scrambleMoves.length} moves`;
       this.setStatus('Scrambled! Click "Solve" to find a solution.', 'success');
     } catch (err) {
-      this.setStatus('Error: ' + err.message, 'error');
+      this.setStatus(this.apiError(err), 'error');
     }
   }
 
@@ -563,7 +564,7 @@ class App {
       );
     } catch (err) {
       this.clearPrediction();
-      this.setStatus('Error: ' + err.message, 'error');
+      this.setStatus(this.apiError(err), 'error');
     }
   }
 
@@ -683,6 +684,11 @@ class App {
     this.speedLabelEl.textContent = `${(ms / 1000).toFixed(2)}s per move`;
   }
 
+  /** Turn a failed request into something the user can act on. */
+  apiError(err) {
+    return describeApiError(err, API_BASE || null);
+  }
+
   async play() {
     if (this.isPlaying || this.currentMoveIndex >= this.solution.length) return;
     // A queued prediction would otherwise reset the solution mid-playback.
@@ -797,7 +803,7 @@ class App {
       this.cubeInput.setFacelet(facelet);
       this.setStatus('Cube loaded. Press Solve to predict the moves.', 'success');
     } catch (err) {
-      this.setStatus('Error: ' + err.message, 'error');
+      this.setStatus(this.apiError(err), 'error');
     }
   }
 
@@ -867,7 +873,7 @@ class App {
       this.capturedFaces = [];
       this.closeWebcam();
     } catch (err) {
-      this.setStatus('Scan failed: ' + err.message, 'error');
+      this.setStatus('Scan failed: ' + this.apiError(err), 'error');
       this.capturedFaces = [];
       this.updateWebcamHint();
     }

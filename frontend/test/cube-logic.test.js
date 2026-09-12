@@ -21,6 +21,7 @@ import {
   applyMoveToFacelet,
   applyMovesToFacelet,
   countColours,
+  describeApiError,
   describeInputProblems,
   faceletAt,
   faceletFromStickers,
@@ -224,4 +225,22 @@ test('an unfilled picker produces a facelet the solver will reject', () => {
   stickers[4] = 'U';
   assert.equal(faceletFromStickers(stickers).length, STICKER_COUNT);
   assert.ok(faceletFromStickers(stickers).includes('?'));
+});
+
+test('a network failure says the backend is not running', () => {
+  const message = describeApiError(new TypeError('Failed to fetch'), 'http://localhost:8000');
+  assert.ok(message.includes('Cannot reach the solver backend at http://localhost:8000'), message);
+  assert.ok(message.includes('uvicorn main:app'), message);
+});
+
+test('a network failure without a known address still explains the fix', () => {
+  const message = describeApiError(new TypeError('Failed to fetch'));
+  assert.ok(message.includes('on this address'), message);
+  assert.ok(message.includes('backend'), message);
+});
+
+test('solver errors are passed through unchanged', () => {
+  const original = new Error('No solution found within 22 moves');
+  assert.equal(describeApiError(original, 'http://localhost:8000'), original.message);
+  assert.equal(describeApiError('something odd'), 'something odd');
 });
