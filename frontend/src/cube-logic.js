@@ -309,6 +309,29 @@ export function isLocalOrigin(origin) {
 }
 
 /**
+ * How a move in the solution list reads against the playback cursor.
+ *
+ * The cursor is the index of the move to play next, so it is the move the person
+ * should be turning right now. Everything before it is done, everything after is
+ * still to come. Following along by counting tokens in a 21 move string is the
+ * step people get wrong.
+ */
+export function movePlaybackState(index, cursor) {
+  if (index < cursor) return 'done';
+  if (index === cursor) return 'current';
+  return 'pending';
+}
+
+/**
+ * The counter beside the cube. Derived from the same cursor as the mark on the
+ * solution, so the two cannot drift apart.
+ */
+export function playbackCounterText(cursor, total) {
+  if (!total) return '0 moves';
+  return cursor === 0 ? `0/${total} moves` : `Move ${cursor}/${total}`;
+}
+
+/**
  * The request never reached our API.
  *
  * Distinct from a normal HTTP failure: a static host answers /api/... with its
