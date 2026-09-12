@@ -12,11 +12,18 @@ import test from 'node:test';
 import {
   FACES,
   FACE_CELLS,
+  FACE_COLOURS,
+  FACE_NET,
   FACE_NORMALS,
+  FACE_ORDER,
+  STICKER_COUNT,
   STICKER_PLACEMENTS,
   applyMoveToFacelet,
   applyMovesToFacelet,
+  countColours,
+  describeInputProblems,
   faceletAt,
+  faceletFromStickers,
   formatMove,
   invertMove,
   invertSequence,
@@ -166,4 +173,55 @@ test('every sticker plane faces outwards', () => {
     );
     assert.ok(offsetMatchesFace, `sticker ${face} is not offset towards its face`);
   }
+});
+
+test('the palette names the six cube colours', () => {
+  const names = FACE_ORDER.map((face) => FACE_COLOURS[face].name);
+  assert.deepEqual(names.sort(), ['blue', 'green', 'orange', 'red', 'white', 'yellow']);
+  for (const face of FACE_ORDER) {
+    assert.match(FACE_COLOURS[face].hex, /^#[0-9a-f]{6}$/);
+  }
+});
+
+test('the picker net covers all six faces exactly once', () => {
+  assert.equal(FACE_NET.length, 6);
+  assert.deepEqual(FACE_NET.map((entry) => entry.face).sort(), [...FACE_ORDER].sort());
+  const cells = new Set(FACE_NET.map(({ row, column }) => `${row},${column}`));
+  assert.equal(cells.size, 6, 'two faces share a net cell');
+});
+
+test('an empty picker reports how many stickers are missing', () => {
+  const stickers = new Array(STICKER_COUNT).fill(null);
+  assert.equal(describeInputProblems(stickers), '54 stickers left to fill');
+  stickers[0] = 'U';
+  assert.equal(describeInputProblems(stickers), '53 stickers left to fill');
+});
+
+test('a full picker with the wrong colour counts is called out', () => {
+  // Red ends up one short, white one over, while blue stays at nine.
+  const stickers = SOLVED.split('');
+  stickers[9] = 'B';   // a red sticker becomes blue
+  stickers[45] = 'U';  // a blue sticker becomes white
+  const problems = describeInputProblems(stickers);
+  assert.ok(problems.includes('red 8/9'), problems);
+  assert.ok(problems.includes('white 10/9'), problems);
+});
+
+test('a complete, valid picker reports no problems', () => {
+  assert.equal(describeInputProblems(SOLVED.split('')), null);
+});
+
+test('countColours tallies each colour', () => {
+  const counts = countColours(SOLVED.split(''));
+  for (const letter of FACE_ORDER) assert.equal(counts[letter], 9, letter);
+  assert.deepEqual(countColours(new Array(STICKER_COUNT).fill(null)), {
+    U: 0, R: 0, F: 0, D: 0, L: 0, B: 0,
+  });
+});
+
+test('an unfilled picker produces a facelet the solver will reject', () => {
+  const stickers = new Array(STICKER_COUNT).fill(null);
+  stickers[4] = 'U';
+  assert.equal(faceletFromStickers(stickers).length, STICKER_COUNT);
+  assert.ok(faceletFromStickers(stickers).includes('?'));
 });

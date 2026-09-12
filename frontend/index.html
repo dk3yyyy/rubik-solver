@@ -51,8 +51,8 @@
             <button id="btn-pause" class="btn btn-small">Pause</button>
             <button id="btn-next" class="btn btn-small">Next</button>
             <button id="btn-prev" class="btn btn-small">Prev</button>
-            <input type="range" id="speed-slider" min="100" max="1000" value="300" class="speed-slider" />
-            <span class="speed-label">Speed</span>
+            <input type="range" id="speed-slider" min="100" max="3000" step="50" value="600" class="speed-slider" aria-label="Playback speed" />
+            <span id="speed-label" class="speed-label">0.60s per move</span>
           </div>
 
           <div class="control-row">
@@ -94,6 +94,27 @@
           </div>
 
           <div id="status" class="status"></div>
+        </div>
+      </section>
+
+      <section id="cube-input" class="cube-input-section content-width">
+        <h2>Enter your cube</h2>
+        <p class="cube-input-hint">
+          Hold the cube with <strong>white on top</strong> and <strong>green facing you</strong>.
+          Pick a colour below, then tap the stickers that match it. The centre stickers are fixed
+          because they define which colour is on which side.
+        </p>
+        <div class="cube-input-body">
+          <div id="cube-net" class="cube-net"></div>
+          <div class="cube-input-side">
+            <div id="cube-palette" class="palette"></div>
+            <div id="cube-input-status" class="input-status">48 stickers left to fill</div>
+            <div class="input-actions">
+              <button id="btn-input-solve" class="btn btn-dark">Predict moves</button>
+              <button id="btn-input-clear" class="btn btn-ghost">Clear</button>
+            </div>
+            <div id="move-prediction" class="move-prediction" hidden></div>
+          </div>
         </div>
       </section>
 
