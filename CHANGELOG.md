@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- A crop that holds a cell of the room behind the cube is not read as a face.
+  Near the edge of its search window the accepted crop can be pushed against the
+  frame border, and then the far side has no probe band left to answer the
+  continuation check with, while the near side is the wall, the desk or the print
+  the cube is in front of - which the classifier reads as stickers, because a
+  grey wall and a white sticker are ten units apart and no colour threshold
+  separates them. The frame is asked instead what part of it is behind the cube,
+  and a crop with a whole cell of that in it is refused. Measured on the 160
+  frame battery at the browser's encoding: two frames that master read confidently
+  wrong are now read right or refused, and no frame master read right is refused
+  or read wrong. The frames whose cells straddle the face's edge rather than
+  holding the room measure the same as legitimate frames do, so this is the wrong
+  instrument for those, and they still misread.
 - A crop of one sticker is not read as a whole face. The boundary between two
   stickers is tested by asking how much of the crossing strip the plastic
   covers, not by asking whether the strip contains a dark pixel: on a face
