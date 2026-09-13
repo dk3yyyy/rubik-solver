@@ -437,3 +437,56 @@ def test_a_detected_face_outline_is_used_and_said_so():
     assert result["source"] == "quad", result["source"]
     assert result["framed"] is True
     assert result["colours"] == SCRAMBLED, result["colours"]
+
+
+def test_a_window_holding_a_cell_of_the_wall_is_never_read_as_stickers():
+    # A face at 70% of the frame, tilted, against a white wall. The crop the
+    # search accepts is pushed against the frame edge, so its far side has no
+    # probe band to answer the continuation check with, and its first cell is the
+    # wall, which the classifier reads as white because a grey wall and a white
+    # sticker are ten units apart. Master answers these frames with nine
+    # confident stickers and a wrong facelet; the frame is asked what part of it
+    # is behind the cube instead, so the crop holding a whole cell of it is
+    # refused.
+    #
+    # Asserted across JPEG qualities on purpose. Which crop the gates let through
+    # on a frame this close to the edge of the search flips with the encoding
+    # (master reads the first frame right at q75 and q80 and wrong at q85 to
+    # q100), so pinning one quality would pin a coin toss. The guarantee this
+    # holds to is the one that matters: never nine confident stickers for a frame
+    # the sampler has not actually read.
+    for quality in (75, 80, 85, 90, 95, 100):
+        frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=0.7, angle=32,
+                                          background=(245, 245, 245)), quality=quality)
+        result = analyse_face(frame)
+        assert not result["found"] or result["colours"] == SCRAMBLED, (quality, result["colours"])
+    read_right = []
+    for quality in (75, 80, 85, 90, 95, 100):
+        frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=0.7, angle=32,
+                                          background=(245, 245, 245)), quality=quality)
+        if analyse_face(frame)["colours"] == SCRAMBLED:
+            read_right.append(quality)
+    assert read_right, "the frame is never read at all, which is not a fix"
+
+
+def test_the_frame_says_what_part_of_it_is_behind_the_cube():
+    # The background is the region that touches the border and matches the
+    # border's colour - here the wall, which is most of the frame.
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=0.5, background=(245, 245, 245)))
+    mask = webcam._background_mask(_working_frame(frame))
+    assert mask is not None
+    assert 0.5 < float(np.count_nonzero(mask)) / mask.size < 0.95
+
+
+def test_a_frame_that_cannot_say_what_is_behind_the_cube_claims_nothing():
+    # The rule may only speak when the frame has an answer, and two frames do not:
+    # one with nothing in it, and one where the border and the middle are the same
+    # colour. For the second, a white cube against a white wall, calling either
+    # way would get a real frame wrong, so it declines - and the face still reads.
+    uniform = np.full((480, 640, 3), 128, np.uint8)
+    assert webcam._background_mask(_working_frame(uniform)) is None
+    frame = jpeg_roundtrip(make_frame(list("U" * 9), coverage=0.85,
+                                      background=(245, 245, 245)))
+    result = analyse_face(frame)
+    assert result["found"], result["reason"]
+    assert result["colours"] == list("U" * 9), result["colours"]
