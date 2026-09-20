@@ -15,6 +15,7 @@ from main import app
 from validator import validate_facelet
 
 SOLVED = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"
+SCRAMBLED = list("URFDLBURF")
 
 
 @pytest.fixture(scope="module")
@@ -429,3 +430,19 @@ def test_allowed_origins_splits_a_comma_separated_list(monkeypatch):
     monkeypatch.setenv("ALLOWED_ORIGINS", "")
     assert main._allowed_origins() == ["*"]
 
+
+
+def test_a_frame_holding_a_cell_of_the_wall_is_not_answered_with_a_cube_state(client):
+    # Six copies of the frame above, which the scan used to answer with a cube
+    # state: it read a cell of the wall as white stickers and then blamed the
+    # cube ("frame 1 should be the white (U) face but its centre reads as red").
+    # The overlay polls a smaller frame and reads this one correctly, so the
+    # endpoint that shows the defect is the scan, and it is the reason the scan
+    # gives that separates the two: naming the frame it could not read, rather
+    # than blaming a cube for a wall.
+    response = client.post("/api/webcam-scan", json={
+        "images": [base64_frame(SCRAMBLED, coverage=0.7, angle=32,
+                                background=(245, 245, 245))] * 6})
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "No cube face was found in frame 1 (U)" in detail, detail

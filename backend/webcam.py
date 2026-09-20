@@ -131,6 +131,26 @@ LINE_DARK_SHARE = 0.4
 # noise, which is a handful of units. Only quad crops ask for this: see
 # _pattern_extends.
 BAND_FLAT_RANGE = 30
+# A cube face is in front of whatever is behind it, so a crop that reads a face
+# is a crop that lies on the cube. Where that is not true the crop is reading the
+# room: a window a cell out of step takes in a column of wall, desk or printed
+# surface, and its nine cells still look like nine stickers because the classifier
+# has no way to tell a grey wall from a white sticker. Colour cannot separate
+# them - a white sticker on a white wall is ten units apart - so the frame is
+# asked a question of position instead: what part of it is behind the cube? The
+# answer is the region that touches the border and matches the border's colour.
+# When the border and the middle of the frame are the same colour the frame does
+# not say which is which (a white cube filling a white wall), so this abstains
+# and the structure rule decides, which is what it was added for.
+BACKGROUND_TOLERANCE = 8
+# How much of one of a crop's nine cells may be background before the crop is
+# reading the room. A cell of a real face is sticker; a crop a cell out of step
+# has a whole cell of wall among its nine. The value comes from measurement, not
+# from judgement: the frames this must not break - the tilted-face fixtures in
+# the suite - measure up to 0.5 in their worst cell, and the crop this is for -
+# a window pushed against the frame edge, holding a whole cell of wall - measures
+# 1.0. Anything between separates them; 0.75 leaves room either side.
+MAX_CELL_BACKGROUND_SHARE = 0.75
 # Sticker gaps are near-black plastic. How much of a face crop they cover is
 # roughly the same for any cube - the plastic lines between nine stickers - so
 # the score rewards a crop that looks like that and penalises one that does not:
@@ -297,6 +317,72 @@ def _internal_lines(bgr: np.ndarray, value: np.ndarray, means: np.ndarray,
                 lines += 1
     return lines
 
+
+
+def _background_mask(frame: np.ndarray) -> Optional[np.ndarray]:
+    """The part of the frame that is behind the cube, or ``None`` if it cannot say.
+
+    The background is the region that touches the frame's border and matches the
+    border's colour. Two things make the frame decline to answer, and both are
+    cases where calling it either way gets a real frame wrong: the border patches
+    disagreeing on a colour (a busy room), and the middle of the frame looking
+    like the border (a white cube against a white wall, where the sticker and the
+    wall are ten units apart and no threshold tells them apart).
+    """
+    height, width = frame.shape[:2]
+    edge = max(2, min(height, width) // 100)
+    corners = np.array([
+        frame[:edge, :edge].reshape(-1, 3).mean(axis=0),
+        frame[:edge, -edge:].reshape(-1, 3).mean(axis=0),
+        frame[-edge:, :edge].reshape(-1, 3).mean(axis=0),
+        frame[-edge:, -edge:].reshape(-1, 3).mean(axis=0),
+    ])
+    colour = np.median(corners, axis=0)
+    if float(np.abs(corners - colour).max()) > BACKGROUND_TOLERANCE * 3:
+        return None
+    middle = frame[height // 4:height * 3 // 4, width // 4:width * 3 // 4].reshape(-1, 3)
+    if middle.size and float(np.abs(middle.mean(axis=0) - colour).max()) <= BACKGROUND_TOLERANCE * 2:
+        return None
+    close = (np.abs(frame.astype(np.int16) - colour.astype(np.int16)).max(axis=2)
+             <= BACKGROUND_TOLERANCE).astype(np.uint8)
+    _, labels = cv2.connectedComponents(close, connectivity=4)
+    touching = set(labels[0].tolist()) | set(labels[-1].tolist())
+    touching |= set(labels[:, 0].tolist()) | set(labels[:, -1].tolist())
+    touching.discard(0)
+    if not touching:
+        return None
+    return np.isin(labels, list(touching)).astype(np.uint8)
+
+
+def _warped_mask(mask: np.ndarray, shape: np.ndarray) -> np.ndarray:
+    """The background mask straightened exactly as a quad crop is, as 0/1.
+
+    Warping interpolates, and an interpolated edge value of 0.3 is not "part
+    background" in any sense the rule can use, so the mask is warped at full
+    contrast and thresholded back to a hard 0/1.
+    """
+    return (warp_face(mask * 255, shape) > 127).astype(np.uint8)
+
+
+def _worst_cell_background(window: Optional[np.ndarray]) -> float:
+    """The largest share of any one of the crop's nine cells that is background.
+
+    Measured cell by cell rather than over the whole crop, and that is the whole
+    point: a crop a little larger than the face carries background in its margins,
+    which says nothing about whether it is a face, while a crop out of step with
+    the face puts a *whole cell* of background among its nine. Measuring the crop
+    as a whole cannot tell those apart - a legitimate crop on a tilted face at
+    0.8 coverage measures 0.24 against 0.23 for a crop reading the room - so this
+    asks the question that has an answer: is any single cell the room?
+    """
+    if window is None or window.size == 0:
+        return 0.0
+    small = cv2.resize(window, (GRID_SAMPLE, GRID_SAMPLE), interpolation=cv2.INTER_NEAREST)
+    cell = GRID_SAMPLE // 3
+    pad = cell // 4
+    interiors = small.reshape(3, cell, 3, cell)[:, pad:cell - pad, :, pad:cell - pad]
+    interiors = interiors.reshape(9, -1)
+    return float(max(np.count_nonzero(row) / row.size for row in interiors))
 
 
 def _crop_stats(crop: np.ndarray, lines: bool = True) -> dict:
@@ -634,6 +720,7 @@ def analyse_face(image: Image) -> dict:
     frame_area = short * short
 
     rotations: dict = {0.0: work}
+    background = _background_mask(work)
 
     def rotated(angle: float) -> np.ndarray:
         key = round(angle, 1)
@@ -641,8 +728,26 @@ def analyse_face(image: Image) -> dict:
             rotations[key] = _rotated(work, key)
         return rotations[key]
 
+    mask_rotations: dict = {}
+    if background is not None:
+        mask_rotations[0.0] = background
+
+    def rotated_mask(angle: float) -> np.ndarray:
+        """The background mask, rotated exactly as the frame it belongs to was.
+
+        Rotating interpolates the same way warping does, so the result is
+        thresholded back to a hard 0/1 rather than left with soft edges that
+        would count as part background.
+        """
+        assert background is not None  # only reached when the frame identified one
+        key = round(angle, 1)
+        if key not in mask_rotations:
+            mask_rotations[key] = (_rotated(background * 255, key) > 127).astype(np.uint8)
+        return mask_rotations[key]
+
     candidates: List[Tuple[str, float, float, float, Tuple[float, float], np.ndarray,
-                          Optional[Tuple[float, float, float]]]] = []
+                          Optional[Tuple[float, float, float]],
+                          Optional[float]]] = []
     quadrangles = _quad_list(work)
     seeds: List[Tuple[tuple, float, float, float, float]] = []
     centroids: List[np.ndarray] = []
@@ -660,8 +765,10 @@ def analyse_face(image: Image) -> dict:
         rect = _quad_rect(quad)
         for inset in QUAD_INSETS:
             shape = _inset_quad(quad, inset)
-            candidates.append(("quad", angle, coverage, coverage,
-                               (0.0, 0.0), warp_face(work, shape), rect))
+            candidates.append(("quad", angle, coverage, coverage, (0.0, 0.0),
+                               warp_face(work, shape), rect,
+                               _worst_cell_background(_warped_mask(background, shape))
+                               if background is not None else None))
 
         # 2. A coarse sweep to find where the face is, anchored on the detected
         #    shape: a sticker puts the face centre within one sticker of it and
@@ -759,7 +866,7 @@ def analyse_face(image: Image) -> dict:
             if crop is None:
                 continue
             candidates.append(("centre", round(angle, 1), round(scale * step, 3),
-                               crop.shape[0] / short, (dx, dy), crop, None))
+                               crop.shape[0] / short, (dx, dy), crop, None, None))
 
     for index, (dx, dy, scale, base) in enumerate(seed_picks):
         if index < FINE_NUDGE_SEEDS:
@@ -781,10 +888,10 @@ def analyse_face(image: Image) -> dict:
         return _rejected("no crop could be sampled")
 
     rows = []
-    for source, angle, scale, coverage, offset, crop, rect in candidates:
+    for source, angle, scale, coverage, offset, crop, rect, bg_share in candidates:
         stats = _crop_stats(crop)
         rows.append((_score(stats, coverage, angle),
-                     (source, angle, scale, coverage, offset, crop, rect), stats))
+                     (source, angle, scale, coverage, offset, crop, rect, bg_share), stats))
     rows.sort(key=lambda row: row[0], reverse=True)
 
     # A detected face-sized quadrilateral is direct evidence of where the face
@@ -794,6 +901,28 @@ def analyse_face(image: Image) -> dict:
     chosen: Optional[Tuple[tuple, tuple, dict]] = None
     best_any = rows[0]
     checked = 0
+
+    def _on_the_background(candidate: tuple) -> bool:
+        """Whether this crop is reading what is behind the cube.
+
+        A crop is a window or a quadrilateral taken out of the frame; if any real
+        part of it is the wall, the desk or the print the cube stands in front of,
+        then the nine "stickers" it reads include that surface, and no colour rule
+        can say so - a white sticker on a white wall is ten units apart. This is
+        the cheap first question asked of a crop, before the expensive ones, and
+        it answers 0 for every frame that does not identify a background.
+        """
+        if background is None:
+            return False
+        if candidate[0] == "quad":
+            share = candidate[7]
+            return share is not None and share > MAX_CELL_BACKGROUND_SHARE
+        ox, oy = _rotated_offset(candidate[4][0] * short, candidate[4][1] * short,
+                                 candidate[1])
+        window = _square_at(rotated_mask(candidate[1]), width / 2.0 + ox,
+                            height / 2.0 + oy, candidate[2] * short)
+        return _worst_cell_background(window) > MAX_CELL_BACKGROUND_SHARE
+
     for want_quad in (True, False):
         for score, candidate, stats in rows:
             if want_quad and candidate[0] != "quad":
@@ -803,6 +932,8 @@ def analyse_face(image: Image) -> dict:
             checked += 1
             if checked > ACCEPT_SCAN_MAX:
                 break
+            if _on_the_background(candidate):
+                continue
             if not _read_is_stable(candidate[5], list(stats["colours"])):
                 continue
             # The continuation check is not optional for a crop read from a
