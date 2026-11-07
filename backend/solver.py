@@ -12,10 +12,13 @@ source build on 3.14 corrupts the table construction, which makes
 
 from __future__ import annotations
 
+import logging
 import random
+import threading
+import time
 from typing import List, Optional, Tuple
 
-from validator import validate_facelet
+from validator import _canonicalize, validate_facelet
 
 try:  # pragma: no cover - exercised through the API tests
     from rubik_solver import Cube, init_solver, solve as _solve
@@ -27,7 +30,16 @@ SOLVED_FACELET = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"
 FACES = "URFDLB"
 SUFFIXES = ("", "'", "2")
 
+logger = logging.getLogger("rubik.solver")
+
 _solver_ready = False
+# The build mutates the library's global tables, so two requests must not run
+# it at the same time.
+_solver_lock = threading.Lock()
+# How long to wait before trying a failed build again. Without a pause, a
+# permanently broken build would rebuild its tables on every request.
+_RETRY_AFTER_FAILURE = 5.0
+_last_failure: Optional[float] = None
 
 
 def is_available() -> bool:
@@ -42,17 +54,26 @@ def is_ready() -> bool:
 
 def init() -> bool:
     """Build the solver tables once. Returns True when the solver is usable."""
-    global _solver_ready
+    global _solver_ready, _last_failure
     if _solver_ready:
         return True
     if not SOLVER_AVAILABLE:
         return False
-    try:
-        init_solver()
-    except Exception:
-        return False
-    _solver_ready = True
-    return True
+    with _solver_lock:
+        if _solver_ready:
+            return True
+        now = time.monotonic()
+        if _last_failure is not None and now - _last_failure < _RETRY_AFTER_FAILURE:
+            return False
+        try:
+            init_solver()
+        except Exception:
+            _last_failure = now
+            logger.exception("Solver table build failed; will retry")
+            return False
+        _solver_ready = True
+        _last_failure = None
+        return True
 
 
 def random_scramble(moves: int = 20) -> Optional[Tuple[str, str]]:
@@ -85,6 +106,11 @@ def apply_moves(facelet: str, moves: str) -> Optional[str]:
     """Apply ``moves`` to ``facelet`` and return the resulting facelet string."""
     if not is_ready():
         return None
+    # The validator accepts a cube whose centres carry any colour scheme, but
+    # the library parses facelets by their literal U/R/F/... letters. Relabel
+    # to the standard scheme first, or the moves get applied to a different
+    # cube than the one the caller described.
+    facelet = _canonicalize(facelet)
     if not moves or not moves.strip():
         return facelet
     cube = Cube.from_string(facelet)
@@ -100,6 +126,9 @@ def solve_facelet(facelet: str, max_depth: int = 22) -> Optional[List[str]]:
     """
     if not is_ready():
         return None
+    # See apply_moves: the validator canonicalises any colour scheme, so the
+    # solver has to read the same normalised cube.
+    facelet = _canonicalize(facelet)
     cube = Cube.from_string(facelet)
     if cube.as_string() == SOLVED_FACELET:
         return []

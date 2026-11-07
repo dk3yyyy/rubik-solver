@@ -8,6 +8,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- A frame the cube fills most of is no longer read a cell out of step (issue
+  #33). At 80-90% coverage and a 21-32 degree tilt the search accepted a window
+  shifted one cell sideways, so its first column was the wall - which the
+  classifier calls white - and its other two were the face's first two columns,
+  answering `UURUDLUUR` at confidence 1.0 for a scrambled face. Two things were
+  wrong. `_worst_cell_background` sliced the nine cell interiors and then
+  reshaped that non-contiguous view, so `reshape(9, -1)` grouped pixels by
+  memory order instead of by cell, and a window holding a whole cell of wall
+  measured 0.375 instead of 1.0 - the gate that exists to refuse exactly this
+  crop under-reported by two thirds. And the dead-centre seed kept the single
+  best size scored at angle 0, which on a tilted face is a coin toss, because no
+  size shows internal lines there; at 0.9 coverage it chose the 0.28 window (a
+  third of the face) and the aligned crop at the face's own size and tilt was
+  never generated. Cells are grouped with the transpose `_crop_stats` already
+  used, and there is now one dead-centre seed per grid size. Measured on the
+  228-frame battery: 202 right / 16 refused / 10 wrong becomes 222 right / 6
+  refused / 0 wrong, with no frame that read right becoming refused or wrong.
+  All eight frames in the issue are read correctly.
+- A crop whose worst cell is three quarters room is no longer read as stickers.
+  The background gate's limit was 0.75 and the comparison was strict, so a cell
+  that was 75% wall passed, and a random sweep of 240 frames found four
+  confident-wrong reads whose worst cell measured 0.711-0.75 against a worst
+  legitimate crop of 0.55. At 0.65 the four are read right or refused and the
+  228-frame battery keeps every one of its right reads.
+- The API answers a cube whose centres carry a different colour scheme. The
+  validator accepts a relabelled cube (a whole-cube rotation) but the solver
+  read the raw letters, solved a different cube than the one described, and the
+  self-check turned that into a 500 for a valid input; a rotated *solved* cube
+  was handed a 16-move "solution" instead of being called solved.
+- A solver whose table build failed at startup is retried. Only the lifespan
+  call ever ran `init_solver`, so one transient failure during a deploy left
+  every solver endpoint answering 503 until the process restarted; the retry is
+  locked against concurrent requests and paced, so a permanently broken build
+  is not rebuilt on every request.
+- An empty or unreadable face upload is a 400, not a 500. `cv2.imdecode` raises
+  on an empty buffer and nothing caught it. The upload is read with a bound now
+  as well: the size check ran after the whole body had been read into memory,
+  which is the opposite of what a limit is for.
+- `/api/detect-frame` has a payload cap. The overlay polls it twice a second and
+  it was the one image endpoint with no ceiling at all.
+- The live overlay no longer throttles itself out of a scan. The limiter allows
+  60 requests a minute per client and the overlay spends 120 a minute just
+  looking at the camera, so half a minute into framing the capture's own calls
+  answered 429 and the scan failed as though the cube were at fault.
+- A 429 from the rate limiter reaches the browser with CORS headers. The limiter
+  answers the request itself, and it sat outside `CORSMiddleware`, so a
+  cross-origin page saw an opaque network failure instead of the message and
+  `Retry-After` that say how long to wait.
+- The frontend's finished features work. Copy Link wrote a `?s=<facelet>` link
+  that nothing read on load; the inspection countdown announced "timer running"
+  while the clock stayed at 00:00.00, because the timeout that started it was
+  cleared by the countdown that ended; the Undo button and `Ctrl/Cmd+Z` had no
+  listener and could never leave `disabled`; `prefers-reduced-motion` was read
+  but never assigned, so moves always animated; the ao5/ao12/mo3 card painted
+  only after a new solve; and Optimize replaced the list on screen while Play
+  followed the old one.
+- A palette switch no longer repaints the cube back to an earlier state. The
+  remembered facelet did not follow hand-typed or stepped moves, so toggling
+  colourblind mode after a few turns put the cube back to solved on screen and
+  Copy Link shared that state.
+- Scramble, Reset, Load and Clear stop playback. A scramble pressed mid-solve
+  left the playback loop running, so its completion branch recorded a solve time
+  for a solve the user had abandoned, and Scramble could replace the cube
+  underneath a move still animating.
+- A `/api/solve` reply that arrives after the entry has moved on is dropped. The
+  prediction fires by itself shortly after the last sticker is painted, so a
+  slow answer could become the solution for a different cube.
+- An element with the `hidden` attribute is actually hidden.
+  `.move-preview { display: flex }` outranked the user agent's rule, so an empty
+  "Next:" bar sat under the controls on every page load.
+- The phone layout keeps the theme and colourblind toggles. `.primary-nav {
+  display: none }` at 900px took the whole header navigation with it, so dark
+  mode and the colourblind palette were unreachable on phones and tablets.
+- The page does not scroll sideways at 320px. The stickers' fixed width made the
+  four-block cube net 28px wider than a 390px phone's content column, a bare
+  `1fr` grid track kept a min-content floor that pushed the statistics row out at
+  320px, and the five history buttons did not wrap; each is sized or wrapped to
+  the column now.
+- The webcam stream is released. Pressing "Scan with webcam" twice requested a
+  second stream without stopping the first, so the camera light stayed on and the
+  first stream was never released; a stream that resolved after the panel closed
+  was still attached to it.
+- The copy buttons work without `navigator.clipboard` (a plain-HTTP LAN origin
+  has none), refuse to make a link from a half-filled cube, and the solve timer
+  and statistics survive a corrupt or throwing `localStorage`.
+- A step requested during playback stops the loop instead of double-counting the
+  cursor, and clearing the move history clears the solution Play follows.
 - A crop that holds a cell of the room behind the cube is not read as a face.
   Near the edge of its search window the accepted crop can be pushed against the
   frame border, and then the far side has no probe band left to answer the
@@ -73,6 +160,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   panel is the `stats-panel` card the stylesheet already styled.
 
 ### Changed
+- The per-client rate limit defaults to 240 requests a minute rather than 60.
+  The old figure suited a person typing a cube in; it did not survive the live
+  overlay, which polls `/api/detect-frame` twice a second while the camera is
+  open and so spends twice the budget before the user has captured anything.
+  Set `RATE_LIMIT_MAX` to put it back, or to 0 to turn the limiter off.
 - The frame sampler searches the whole picture for the face, not the middle of
   it. A cube held off centre, at arm's length or against a bright desk used to be
   refused, or read from whatever the middle of the frame happened to be: the

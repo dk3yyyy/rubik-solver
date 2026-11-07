@@ -446,17 +446,24 @@ plain http address on your local network.
 
 | Variable                | Default         | Description                                |
 |-------------------------|-----------------|--------------------------------------------|
-| `BACKEND_HOST`          | `0.0.0.0`       | Host the backend binds to                  |
-| `BACKEND_PORT`          | `8000`          | Port the backend listens on                |
+| `PORT`                  | `8000`          | Port the backend listens on                |
+| `LOG_LEVEL`             | `INFO`          | Level for the structured JSON logger       |
 | `ALLOWED_ORIGINS`       | `*`             | Comma separated list of origins allowed by CORS |
-| `RATE_LIMIT_MAX`        | `60`            | Requests per client per window; `0` disables the limiter |
+| `RATE_LIMIT_MAX`        | `240`           | Requests per client per window; `0` disables the limiter |
 | `RATE_LIMIT_WINDOW`     | `60`            | Length of that window in seconds           |
 | `TRUST_PROXY`           | *(unset)*       | Set to `true` behind a proxy so the limiter keys on the client, not the proxy |
 | `VITE_API_URL`          | *(empty, same origin)* | API base URL used by the frontend  |
-| `SOLVER_MAX_MOVES`      | `22`            | Upper bound on solution length             |
-| `WEBCAM_RESOLUTION`     | `1280x720`      | Requested webcam capture resolution        |
 
-Copy `.env.example` to `.env` in both `backend/` and `frontend/` to customize these values.
+There is no `.env` file to copy: the backend reads these from the process
+environment, so set them in your shell, in `docker-compose.yml`, or in the
+platform's dashboard. `VITE_API_URL` is read by Vite when the frontend is built,
+so rebuild (`npm run build`) after changing it.
+
+The limiter's default is sized for the live webcam overlay, which polls
+`/api/detect-frame` twice a second while the camera is open: 60 a minute would
+be spent on framing alone, and the scan that followed would be answered `429`.
+Lower it if you do not use the scanner, and raise it (or set it to `0`) if you
+front the app with your own limiter.
 
 ---
 

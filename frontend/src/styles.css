@@ -2,6 +2,13 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* An element carrying the hidden attribute must not be displayed. The UA
+   stylesheet hides it with display:none, but a class rule such as
+   `.move-preview { display: flex }` outranks that: the empty "Next:" bar and the
+   webcam confidence bar used to sit on the page with their hidden attribute set
+   and their display forced back on. !important is what this utility needs. */
+[hidden] { display: none !important; }
+
 :root {
   --paper: #f8f7f4;
   --surface: #fffefa;
@@ -247,6 +254,10 @@ body {
 
 .history-actions {
   display: flex; gap: 6px;
+  /* Five buttons on one line need about 344px; the content width of a 375px
+     phone is 339px, and a 320px one is 284px. Wrapping them costs a second line
+     and stops the last one (Clear) hanging off the right edge. */
+  flex-wrap: wrap;
 }
 
 /* Webcam Panel */
@@ -746,9 +757,17 @@ body {
 /* Responsive */
 @media (max-width: 900px) {
   :root { --content-width: calc(100vw - 36px); }
-  .solver-section { grid-template-columns: 1fr; }
+  /* minmax(0, 1fr), not 1fr: a bare 1fr track has a min-content floor, so the
+     statistics row (four "1fr" cells that cannot shrink below their label)
+     pushed the single column 54px past a 320px viewport and the page scrolled
+     sideways. The floor is what has to go for the column to fit a phone. */
+  .solver-section { grid-template-columns: minmax(0, 1fr); }
   .cube-container { min-height: 350px; }
-  .primary-nav { display: none; }
+  /* Hide the two section links, not the whole navigation: display:none on the
+     nav took the dark-mode and colourblind toggles away from every phone and
+     tablet, leaving those settings unreachable on the devices that need them. */
+  .primary-nav { gap: 10px; }
+  .primary-nav a { display: none; }
   .site-footer { flex-direction: column; gap: 8px; }
   .cube-input-body { flex-direction: column; }
   .cube-input-side { width: 100%; }
@@ -759,7 +778,19 @@ body {
   .text-input { min-width: 0; }
   .speed-slider { width: 100%; }
   .cube-net { gap: 6px; padding: 10px; }
-  .sticker { width: 24px; height: 24px; }
+  /* The net is four face blocks of three stickers, so it is twelve stickers
+     across. At 390px a page gutter of 36px leaves 354px of content, and twelve
+     24px stickers plus the block padding (4 each side), the inner gaps (3), the
+     net gaps (6) and the net padding (10) need 382px: the net ran 12px past the
+     right edge and the whole page scrolled sideways, which is what a phone
+     screenshot showed. The sticker therefore grows only as far as the twelve
+     across layout allows - 130px is the gutter plus that fixed chrome - so it
+     stays 24px on a large phone and shrinks to fit a 320px one. */
+  .sticker {
+    width: clamp(14px, calc((100vw - 130px) / 12), 24px);
+    height: auto;
+    aspect-ratio: 1;
+  }
   .face-label { font-size: 9px; }
 }
 

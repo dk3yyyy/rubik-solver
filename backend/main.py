@@ -92,6 +92,14 @@ logger = logging.getLogger("rubik.api")
 # One image per face, six faces on a cube.
 FACE_COUNT = 6
 
+# Base64 inflates an image by about a third, so this caps an encoded frame at
+# roughly 1.5 MB of JPEG. The live overlay polls /api/detect-frame twice a
+# second, so it needs the same ceiling as the scan.
+MAX_IMAGE_PAYLOAD = 2 * 1024 * 1024
+
+# Ceiling for a single uploaded face image.
+MAX_FACE_UPLOAD = 5 * 1024 * 1024
+
 # The order the scanner expects the six images in, which is also the order
 # facelets are written: U, R, F, D, L, B.
 FACE_ORDER = ("U", "R", "F", "D", "L", "B")
@@ -107,11 +115,12 @@ except ImportError:  # pragma: no cover - OpenCV not installed
     webcam = None  # type: ignore[assignment]
     WEBCAM_AVAILABLE = False
 
-# Rate limiting. The default suits one person entering a cube: filling the net in
-# and correcting a scanned cube each trigger a solve every time the cube becomes
-# complete, so a limit that sounds generous per request still has to survive a
-# burst of edits. Set RATE_LIMIT_MAX=0 to turn the limiter off.
-RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "60"))
+# Rate limiting. The live overlay polls /api/detect-frame twice a second, so a
+# minute of framing is 120 requests from one client before any solve. The
+# default has to cover that plus the burst of solves and corrections a scan
+# session produces; a limit that only suits typing throttles the scan and the
+# solve that follows it. Set RATE_LIMIT_MAX=0 to turn the limiter off.
+RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "240"))
 RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))
 
 # The platform's health check must never be throttled: a 429 there reads as a
@@ -179,16 +188,6 @@ def _allowed_origins() -> list[str]:
     return origins or ["*"]
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_allowed_origins(),
-    # Wildcard origins and credentials are mutually exclusive per the CORS spec;
-    # this API is unauthenticated so credentials are not needed.
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
-)
-
 # GZip compresses responses >= 500 bytes. JSON responses (solve, scramble,
 # webcam-scan) compress well and the threshold avoids wasting cycles on tiny
 # responses like the health check.
@@ -248,6 +247,39 @@ async def rate_limit_middleware(request: Request, call_next):
                 del _rate_limit_store[stale_key]
 
     return await call_next(request)
+
+
+# A full scan is six images at MAX_IMAGE_PAYLOAD each, so this leaves room for
+# the JSON around them while still refusing a body that exists only to make the
+# parser allocate. The length is checked before the body is read; a chunked
+# upload has none to check, but this stops the ordinary case.
+MAX_REQUEST_BODY = 16 * 1024 * 1024
+
+
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_REQUEST_BODY:
+        return JSONResponse(
+            status_code=413,
+            content={"detail": "Request body too large (max 16 MB)"},
+        )
+    return await call_next(request)
+
+
+# CORS is added after the limiter so it wraps it. A 429 returned from the
+# limiter never reaches middleware registered further in, so with the order
+# reversed the browser saw a cross-origin failure instead of the JSON detail
+# and Retry-After that explain the wait.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins(),
+    # Wildcard origins and credentials are mutually exclusive per the CORS spec;
+    # this API is unauthenticated so credentials are not needed.
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
 @app.middleware("http")
@@ -330,7 +362,10 @@ def _normalize(state: str) -> str:
 
 
 def _require_solver() -> None:
-    if not solver.is_ready():
+    # init() is not just a readiness check: after a failed startup build it
+    # retries (paced by its own cooldown), so one transient failure does not
+    # leave every solver endpoint answering 503 until the process restarts.
+    if not solver.init():
         raise HTTPException(status_code=503, detail="Solver not available")
 
 
@@ -389,6 +424,24 @@ async def get_scramble() -> ScrambleResponse:
     return ScrambleResponse(scramble=scramble, state=state)
 
 
+def _apply_solution(state: str, moves: List[str]) -> str:
+    """Apply a solver result and refuse a sequence that does not solve the cube.
+
+    Both /api/solve and /api/step report this sequence, so both need the same
+    guard: a broken table set that hands back moves which solve nothing is a
+    server-side failure, not a solution to show the user.
+    """
+    solved_state = solver.apply_moves(state, " ".join(moves))
+    if solved_state is None:
+        raise HTTPException(status_code=500, detail="Solver produced an unreadable state")
+    if not is_solved(solved_state):
+        raise HTTPException(
+            status_code=500,
+            detail="Solver returned a move sequence that does not solve this cube",
+        )
+    return solved_state
+
+
 @app.post("/api/solve", response_model=SolveResponse, tags=["cube"])
 async def solve_cube(req: StateRequest) -> SolveResponse:
     """Solve a cube from its facelet string."""
@@ -399,18 +452,8 @@ async def solve_cube(req: StateRequest) -> SolveResponse:
     if moves is None:
         raise HTTPException(status_code=422, detail="No solution found within 22 moves")
 
-    solution = " ".join(moves)
-    solved_state = solver.apply_moves(state, solution)
-    if solved_state is None:
-        raise HTTPException(status_code=500, detail="Solver produced an unreadable state")
-    if not is_solved(solved_state):
-        # Applying the moves must actually solve the cube; if it does not, the
-        # tables are wrong and reporting the sequence would be a silent lie.
-        raise HTTPException(
-            status_code=500,
-            detail="Solver returned a move sequence that does not solve this cube",
-        )
-    return SolveResponse(solution=solution, move_count=len(moves), solved_state=solved_state)
+    solved_state = _apply_solution(state, moves)
+    return SolveResponse(solution=" ".join(moves), move_count=len(moves), solved_state=solved_state)
 
 
 @app.post("/api/validate", response_model=ValidateResponse, tags=["cube"])
@@ -431,6 +474,11 @@ async def step_cube(req: StepRequest) -> StepResponse:
         raise HTTPException(status_code=422, detail="No solution found within 22 moves")
     if not moves:
         raise HTTPException(status_code=422, detail="Cube is already solved")
+
+    # The whole sequence has to solve the cube before any single step of it is
+    # offered for playback; otherwise is_complete could be true while the cube
+    # is unsolved.
+    _apply_solution(state, moves)
 
     total = len(moves)
     if req.step >= total:
@@ -472,7 +520,7 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
 
     # Validate payload sizes before decoding
     for payload in payloads:
-        if len(payload) > 2 * 1024 * 1024:  # ~2MB base64 limit
+        if len(payload) > MAX_IMAGE_PAYLOAD:
             raise HTTPException(
                 status_code=413,
                 detail=f"Image payload too large (max ~2 MB base64)"
@@ -574,12 +622,16 @@ async def webcam_scan(req: WebcamScanRequest) -> WebcamScanResponse:
 async def detect_single_face(file: UploadFile = File(...)) -> DetectResponse:
     """Detect the nine stickers of a single uploaded face image."""
     detector = _require_webcam()
-    
-    # Limit file size to 5 MB
-    content = await file.read()
-    if len(content) > 5 * 1024 * 1024:
+
+    # Bound the read at the limit itself. The multipart parser has already
+    # spooled the body, but an unbounded read would pull a multi-gigabyte
+    # upload into memory before the size check could reject it.
+    content = await file.read(MAX_FACE_UPLOAD + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="File is empty")
+    if len(content) > MAX_FACE_UPLOAD:
         raise HTTPException(status_code=413, detail="File too large. Maximum 5 MB.")
-    
+
     colors, confidence = detector.detect_face_colors(content)
     if any(color is None for color in colors):
         raise HTTPException(status_code=422, detail="Could not classify every sticker on this face")
@@ -611,6 +663,11 @@ async def detect_frame(req: DetectFrameRequest) -> DetectFrameResponse:
     face is clearly visible and well-positioned.
     """
     detector = _require_webcam()
+    if len(req.image) > MAX_IMAGE_PAYLOAD:
+        raise HTTPException(
+            status_code=413,
+            detail="Image payload too large (max ~2 MB base64)",
+        )
     content = _decode_base64_image(req.image)
     result = detector.detect_face_stability(content)
     return DetectFrameResponse(**result)

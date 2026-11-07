@@ -14,6 +14,7 @@ import {
   frameIsBlank,
   framesLookIdentical,
   invertMove,
+  isCompleteFacelet,
   movePlaybackState,
   moveToRotation,
   optimizeMoves,
@@ -380,7 +381,7 @@ class MoveHistory {
   format(moves) { return moves.join(' '); }
 }
 
-class App {
+export class App {
   constructor() {
     this.cube = null;
     this.timer = new Timer();
@@ -419,6 +420,7 @@ class App {
     this.themeIcon = document.getElementById('theme-icon');
     this.cbToggle = document.getElementById('cb-toggle');
     this.colorblindMode = false;
+    this.reducedMotion = false;
     this.ariaLive = document.getElementById('aria-live');
     this.stats = new SpeedcubingStats();
     this.inspectionActive = false;
@@ -427,6 +429,8 @@ class App {
     this.inspectionTimeout = null;
     this.solveStartTime = null;
     this.manualMoveStack = [];
+    this.undoButton = document.getElementById('btn-undo');
+    this.solveRequestId = 0;
     this.movePreviewEl = null;
     this.movePreviewMovesEl = null;
 
@@ -445,8 +449,14 @@ class App {
     this.bindEvents();
     this.updateSpeedLabel();
     this.updateBestTimesDisplay();
+    this.updateStatsDisplay();
     this.updateInputStatus(this.cubeInput.getState());
+    this.initAccessibility();
+    this.updateUndoButton();
     this.setStatus('Fill in your cube below, or press Scramble to try a random one.', 'info');
+    // The Copy Link button writes ?s=<facelet>; without this the link opened a
+    // page that ignored the cube it carried.
+    this.loadDeepLink();
   }
 
 
@@ -462,6 +472,7 @@ class App {
     document.getElementById('btn-scramble').addEventListener('click', () => this.scramble());
     document.getElementById('btn-solve').addEventListener('click', () => this.solveAndPlay());
     document.getElementById('btn-reset').addEventListener('click', () => this.reset());
+    if (this.undoButton) this.undoButton.addEventListener('click', () => this.undoManualMove());
     document.getElementById('btn-play').addEventListener('click', () => this.play());
     document.getElementById('btn-pause').addEventListener('click', () => this.pause());
     document.getElementById('btn-next').addEventListener('click', () => this.next());
@@ -487,6 +498,12 @@ class App {
 
     document.addEventListener('keydown', (e) => {
       if (document.activeElement.tagName === 'INPUT') return;
+      // Taking back a hand-typed move, the same shortcut a text editor uses.
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        this.undoManualMove();
+        return;
+      }
       // Arrow keys step through the solution one move at a time.
       if (e.key === 'ArrowRight') {
         e.preventDefault();
@@ -524,9 +541,7 @@ class App {
       if (map[e.key]) {
         e.preventDefault();
         this.ensureTimerRunning();
-        this.cube.enqueue(map[e.key], true);
-        this.history.addMove(map[e.key]);
-        this.updateHistoryDisplay();
+        this.applyManualMove(map[e.key]);
       }
     });
 
@@ -539,15 +554,22 @@ class App {
   async scramble() {
     this.setStatus('Generating scramble...', 'loading');
     this.announce('Generating scramble');
+    // A scramble pressed while a solution is playing must stop that playback.
+    // Leaving the loop running let the completion branch below record a solve
+    // time for a solve the person had already abandoned.
+    this.isPlaying = false;
     try {
       const data = await readApiResponse(await fetch(api('/scramble')));
 
+      // Let any move already animating finish before its cubies are reset, or
+      // the settle at the end of that move lands on top of the reset cube.
+      await this.cube.queue;
       this.cube.reset();
       this.scrambleMoves = data.scramble.split(' ').filter(Boolean);
       this.solution = [];
       this.solvedState = null;
       this.currentMoveIndex = 0;
-      this.manualMoveStack = [];
+      this.clearManualMoves();
 
       this.timer.reset();
       this.endInspection();
@@ -581,11 +603,6 @@ class App {
     if (this.timer.running || this.timer.elapsed > 0) return;
     if (this.inspectionActive) return;
     this.startInspection();
-    // When inspection ends, start the timer.
-    this.inspectionTimeout = setTimeout(() => {
-      this.timer.start();
-      this.startTimerDisplay();
-    }, 15000);
   }
 
   /**
@@ -610,7 +627,8 @@ class App {
       return;
     }
 
-    const facelet = (state && state.complete)
+    const fromPicker = Boolean(state && state.complete);
+    const facelet = fromPicker
       ? state.facelet
       : (this.faceletInput.value.trim().toUpperCase() || this.currentFacelet);
 
@@ -620,6 +638,12 @@ class App {
       return;
     }
 
+    // Prediction fires on its own shortly after the last sticker is painted, so
+    // a reply can land after the entry has moved on. Tag each request and drop
+    // any answer that a later request, or a later edit, has superseded.
+    this.solveRequestId = (this.solveRequestId || 0) + 1;
+    const requestId = this.solveRequestId;
+
     this.setStatus('Solving...', 'loading');
     this.announce('Solving cube');
     try {
@@ -628,6 +652,12 @@ class App {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ state: facelet })
       }));
+
+      if (requestId !== this.solveRequestId) return;
+      if (fromPicker) {
+        const latest = this.cubeInput.getState();
+        if (!latest.complete || latest.facelet !== facelet) return;
+      }
 
       this.solution = data.solution.split(' ').filter(Boolean);
       this.solvedState = data.solved_state;
@@ -707,7 +737,12 @@ class App {
     if (!this.isPlaying) {
       const painted = state.stickers.filter(Boolean).length;
       // With nothing entered yet, rest on the solved cube rather than a dark one.
-      this.cube.updateStickers(painted <= FACE_COUNT ? SOLVED_FACELET : state.facelet);
+      const shown = painted <= FACE_COUNT ? SOLVED_FACELET : state.facelet;
+      this.cube.updateStickers(shown);
+      // The remembered facelet is what palette switches repaint from, so it has
+      // to follow the picker. Leaving it on the old state made the cube jump
+      // back to that state when colourblind mode was toggled.
+      this.currentFacelet = shown;
     }
 
     this.updateInputStatus(state);
@@ -749,6 +784,7 @@ class App {
 
   clearInput() {
     clearTimeout(this.predictionTimer);
+    this.clearManualMoves();
     this.solution = [];
     this.solvedState = null;
     this.solvedInputFacelet = null;
@@ -766,6 +802,10 @@ class App {
 
   updateSpeedLabel() {
     if (!this.speedLabelEl) return;
+    if (this.reducedMotion) {
+      this.speedLabelEl.textContent = 'instant moves (reduced motion)';
+      return;
+    }
     const ms = Number(this.speedSlider.value);
     this.speedLabelEl.textContent = `${(ms / 1000).toFixed(2)}s per move`;
   }
@@ -791,19 +831,30 @@ class App {
   async play() {
     if (this.isPlaying || this.currentMoveIndex >= this.solution.length) return;
     clearTimeout(this.predictionTimer);
+    // The list this playback was started for. Scramble, Reset and Clear can
+    // replace this.solution while a move is in flight, and the loop must not
+    // mistake that for having reached the end.
+    const solution = this.solution;
     this.isPlaying = true;
+    this.clearManualMoves();
     this.timer.start();
     this.startTimerDisplay();
     this.announce('Playing solution');
 
-    while (this.isPlaying && this.currentMoveIndex < this.solution.length) {
-      const move = this.solution[this.currentMoveIndex];
+    while (this.isPlaying && this.currentMoveIndex < solution.length) {
+      const move = solution[this.currentMoveIndex];
       this.currentMoveIndex += 1;
       await this.cube.enqueue(move, !this.reducedMotion);
       this.updatePlaybackDisplay();
     }
 
-    if (this.currentMoveIndex >= this.solution.length) {
+    // Whatever ended the loop, the cube has settled on the moves played so far.
+    // (Skipped when a replacement state has taken over the cube.)
+    if (this.solution === solution) {
+      this.syncRenderedFacelet();
+    }
+
+    if (this.isPlaying && this.solution === solution && this.currentMoveIndex >= solution.length) {
       this.isPlaying = false;
       this.timer.stop();
       this.stopTimerDisplay();
@@ -811,6 +862,56 @@ class App {
       this.saveTime();
       this.announce('Solution complete');
     }
+  }
+
+  /**
+   * Remember the facelet the settled cube is showing. Palette switches repaint
+   * from this string, and Copy Link puts it in the URL, so it has to follow
+   * every move that reaches the cube by hand or through playback.
+   */
+  syncRenderedFacelet() {
+    this.currentFacelet = this.cube.readFacelet();
+  }
+
+  /**
+   * Turn one layer by hand. The move is stacked so Undo can take it back, and
+   * the remembered facelet follows the cube, so a later palette switch or link
+   * copy describes the cube on screen rather than the state before the move.
+   */
+  async applyManualMove(move) {
+    // Stack the move before the animation runs, so Undo is live as soon as the
+    // key is pressed rather than after the turn finishes.
+    this.manualMoveStack.push(move);
+    this.history.addMove(move);
+    this.updateUndoButton();
+    await this.cube.enqueue(move, !this.reducedMotion);
+    this.syncRenderedFacelet();
+    this.announce(`Move ${move}`);
+  }
+
+  /** Take back the last move typed by hand. */
+  async undoManualMove() {
+    const move = this.manualMoveStack.pop();
+    if (!move) return;
+    this.history.manual.pop();
+    this.updateUndoButton();
+    await this.cube.enqueue(invertMove(move), !this.reducedMotion);
+    this.syncRenderedFacelet();
+    this.announce(`Undid ${move}`);
+    this.setStatus(`Undid ${move}`, 'info');
+  }
+
+  /** The Undo button is only usable while there is a hand-typed move to take back. */
+  updateUndoButton() {
+    if (!this.undoButton) return;
+    this.undoButton.disabled = this.manualMoveStack.length === 0;
+  }
+
+  /** A new cube state makes the hand-typed move stack meaningless. */
+  clearManualMoves() {
+    this.manualMoveStack = [];
+    this.history.manual = [];
+    this.updateUndoButton();
   }
 
   /**
@@ -837,10 +938,18 @@ class App {
   }
 
   async next() {
+    // Stepping and Play both move the same cursor, so letting them run together
+    // made the cursor and the cube drift apart: the Play loop counted a move
+    // while Next incremented the cursor for the same move again. Taking manual
+    // control is what pressing Next means, so stop the loop and step from where
+    // playback had got to. Disabling the buttons instead would also have
+    // ignored the arrow keys, which take this same path.
+    if (this.isPlaying) this.pause();
     if (this.currentMoveIndex < this.solution.length) {
       const move = this.solution[this.currentMoveIndex];
       this.currentMoveIndex += 1;
       await this.cube.enqueue(move, !this.reducedMotion);
+      this.syncRenderedFacelet();
       this.updatePlaybackDisplay();
       this.announce(`Move ${this.currentMoveIndex} of ${this.solution.length}: ${move}`);
       if (this.currentMoveIndex === this.solution.length) {
@@ -851,16 +960,21 @@ class App {
   }
 
   async prev() {
+    // Same mutual exclusion as next(): a step request ends playback first.
+    if (this.isPlaying) this.pause();
     if (this.currentMoveIndex > 0) {
       const move = this.solution[this.currentMoveIndex - 1];
       this.currentMoveIndex -= 1;
       await this.cube.enqueue(invertMove(move), !this.reducedMotion);
+      this.syncRenderedFacelet();
       this.updatePlaybackDisplay();
       this.announce(`Back to move ${this.currentMoveIndex} of ${this.solution.length}`);
     }
   }
 
   reset() {
+    this.isPlaying = false;
+    this.clearManualMoves();
     this.cube.reset();
     this.solution = [];
     this.scrambleMoves = [];
@@ -868,7 +982,6 @@ class App {
     this.solvedInputFacelet = null;
     this.currentFacelet = SOLVED_FACELET;
     this.currentMoveIndex = 0;
-    this.isPlaying = false;
     this.lastMirrored = null;
     this.faceletInput.value = '';
     this.timer.reset();
@@ -900,11 +1013,14 @@ class App {
       }));
       if (!data.valid) { this.setStatus('Invalid: ' + data.error, 'error'); return; }
 
+      this.isPlaying = false;
+      this.clearManualMoves();
       this.cube.reset();
       this.cube.updateStickers(facelet);
       this.currentFacelet = facelet;
       this.solvedState = null;
       this.solvedInputFacelet = null;
+      this.currentMoveIndex = 0;
       this.cubeInput.setFacelet(facelet);
       this.setStatus('Cube loaded. Press Solve to predict the moves.', 'success');
     } catch (err) {
@@ -915,10 +1031,19 @@ class App {
   async webcam() {
     const panel = document.getElementById('webcam-panel');
     const video = document.getElementById('webcam-video');
+    // A scan is a new session. The counter is how a reply from getUserMedia
+    // knows whether the panel that asked for it is still the one on screen;
+    // closeWebcam() bumps it too. The button stays clickable while the panel is
+    // open, and pressing it again used to call getUserMedia a second time and
+    // simply overwrite this.currentStream: the first stream was never stopped,
+    // so the camera light stayed on and the device stayed busy.
+    this.webcamSession = (this.webcamSession || 0) + 1;
+    const session = this.webcamSession;
+    this.stopWebcamStream();
+    this.stopFaceDetection();
     this.capturedFaces = [];
     this.lastCapturePixels = null;
     this.autoCaptureEnabled = false;
-    this.faceDetectionTimer = null;
     this.lastFacePosition = null;
     this.faceStableSince = null;
     this.updateWebcamHint();
@@ -938,9 +1063,15 @@ class App {
     // mediaDevices only exists in a secure context, so a phone opening the app
     // over plain http on the local network has no camera API at all.
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      // "Open it at localhost" is advice a phone cannot follow: on the phone
+      // localhost is the phone. Say what is true for each device instead - the
+      // computer running the backend can use localhost, and anything else needs
+      // the app served over https.
       this.setStatus(
-        'This page cannot reach the camera. Browsers only allow it over https or on '
-        + 'localhost, so open the app at http://localhost:8000 rather than a network address.',
+        'This page cannot reach the camera, because browsers only allow camera access '
+        + 'over https or on the machine that serves the app. On that computer, open '
+        + 'http://localhost:8000; on a phone or another device, the app has to be '
+        + 'served over https.',
         'error',
       );
       panel.hidden = true;
@@ -949,14 +1080,31 @@ class App {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      video.srcObject = stream;
+      // The permission prompt can stay up for as long as the person takes, and
+      // the panel can be closed (or a second scan started) meanwhile. Attaching
+      // this stream now would turn the camera back on behind a closed panel
+      // with no reference left to stop it, so release it instead.
+      if (session !== this.webcamSession) {
+        this.stopStream(stream);
+        return;
+      }
       this.currentStream = stream;
+      video.srcObject = stream;
       // autoplay is subject to browser policy. Asking explicitly means a stream
       // that never starts is reported here, rather than arriving at the scanner
       // as six black frames it cannot read.
       await video.play();
+      // Closing during autoplay is the same race one step later, and the stream
+      // is now owned by the panel, so release it through the session's state.
+      if (session !== this.webcamSession) {
+        this.stopWebcamStream();
+        return;
+      }
       this.startFaceDetection();
     } catch (err) {
+      // A failure from a session nobody wants any more (a second scan has
+      // replaced it) must not close the panel that is open now.
+      if (session !== this.webcamSession) return;
       this.setStatus('Camera: ' + ((err && err.message) || err), 'error');
       this.closeWebcam();
     }
@@ -1158,11 +1306,14 @@ class App {
         body: JSON.stringify({ images: this.capturedFaces })
       }));
 
+      this.isPlaying = false;
+      this.clearManualMoves();
       this.cube.reset();
       this.cube.updateStickers(data.state);
       this.currentFacelet = data.state;
       this.solvedState = null;
       this.solvedInputFacelet = null;
+      this.currentMoveIndex = 0;
       this.cubeInput.setFacelet(data.state);
       this.moveCounterEl.textContent = 'Scanned cube';
       this.setStatus(
@@ -1179,18 +1330,51 @@ class App {
     }
   }
 
-  closeWebcam() {
-    const panel = document.getElementById('webcam-panel');
-    const video = document.getElementById('webcam-video');
-    if (this.currentStream) {
-      this.currentStream.getTracks().forEach(t => t.stop());
-      this.currentStream = null;
+  /** Stop every track in a MediaStream, which is what releases the device. */
+  stopStream(stream) {
+    if (!stream || typeof stream.getTracks !== 'function') return;
+    for (const track of stream.getTracks()) {
+      if (track && typeof track.stop === 'function') track.stop();
     }
+  }
+
+  /**
+   * Release the stream this panel owns, if any.
+   *
+   * Every track is stopped, not just the first: a camera is video-only today,
+   * but any track left live keeps the device open and the indicator lit.
+   */
+  stopWebcamStream() {
+    const stream = this.currentStream;
+    this.currentStream = null;
+    this.stopStream(stream);
+  }
+
+  /** Stop the 500ms face-detection poll, and forget it. */
+  stopFaceDetection() {
     if (this.faceDetectionTimer) {
       clearInterval(this.faceDetectionTimer);
       this.faceDetectionTimer = null;
     }
+  }
+
+  closeWebcam() {
+    // Bump the session first: a getUserMedia or video.play() still in flight
+    // belongs to a panel nobody wants now, and must stop its own stream rather
+    // than attach it to a hidden video element.
+    this.webcamSession = (this.webcamSession || 0) + 1;
+    const panel = document.getElementById('webcam-panel');
+    const video = document.getElementById('webcam-video');
+    const owned = this.currentStream;
+    this.stopWebcamStream();
+    if (video.srcObject && video.srcObject !== owned) {
+      // A stream that reached the element without becoming this.currentStream
+      // (a reply from a superseded scan): it would outlive the panel, so stop
+      // it too. The stream just stopped is skipped so its tracks stop once.
+      this.stopStream(video.srcObject);
+    }
     video.srcObject = null;
+    this.stopFaceDetection();
     panel.hidden = true;
   }
 
@@ -1229,6 +1413,10 @@ class App {
       chip.className = 'move-chip';
       chip.dataset.index = String(index);
       chip.textContent = move;
+      // Both history lists are role="list"; a list whose children have no role
+      // is announced as empty by some screen readers, which showed the moves
+      // visually and hid them from assistive technology.
+      chip.setAttribute('role', 'listitem');
       container.appendChild(chip);
     });
   }
@@ -1241,6 +1429,9 @@ class App {
       const state = movePlaybackState(index, this.currentMoveIndex);
       chip.classList.toggle('is-done', state === 'done');
       chip.classList.toggle('is-current', state === 'current');
+      // The chip is the only place that says which move is next while stepping,
+      // so name it for a screen reader as well as colouring it.
+      chip.setAttribute('aria-current', state === 'current' ? 'true' : 'false');
     }
   }
 
@@ -1264,19 +1455,95 @@ class App {
 
   copyHistory() {
     const text = `Scramble: ${this.history.format(this.history.scramble)}\nSolution: ${this.history.format(this.history.solution)}`;
-    navigator.clipboard.writeText(text)
-      .then(() => this.setStatus('Copied!', 'success'))
-      .catch(() => this.setStatus('Copy failed', 'error'));
+    return this.copyText(text, 'Copied!');
+  }
+
+  /**
+   * Put text on the clipboard, or say why it could not be done.
+   *
+   * The async Clipboard API only exists in a secure context. Opening the app
+   * over plain http on the LAN is supported (see isLocalOrigin), and there
+   * navigator.clipboard is undefined - yet both copy buttons called
+   * navigator.clipboard.writeText directly, so pressing either threw a
+   * TypeError, copied nothing, and left the status line untouched. Fall back to
+   * the old textarea + execCommand('copy') path, which still works there, and
+   * report a readable failure when even that is refused.
+   */
+  async copyText(text, successMessage) {
+    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : null;
+    if (clipboard && typeof clipboard.writeText === 'function') {
+      try {
+        await clipboard.writeText(text);
+        this.setStatus(successMessage, 'success');
+        return true;
+      } catch (err) {
+        // A permissions policy or an unfocused document can reject the async
+        // API while execCommand still works, so try that before giving up.
+      }
+    }
+    if (this.execCommandCopy(text)) {
+      this.setStatus(successMessage, 'success');
+      return true;
+    }
+    this.setStatus(
+      'Copy failed: this page is not allowed to use the clipboard. '
+      + 'Select the text and copy it by hand.',
+      'error',
+    );
+    return false;
+  }
+
+  /**
+   * The pre-Clipboard-API copy path.
+   *
+   * execCommand only acts on a selection, so the scratch textarea has to be in
+   * the document and selected; it is removed again straight away so nothing is
+   * left behind on the page. It is moved off-screen rather than hidden because
+   * a display:none element cannot be selected.
+   */
+  execCommandCopy(text) {
+    if (typeof document === 'undefined' || !document.body
+      || typeof document.execCommand !== 'function') {
+      return false;
+    }
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    let copied = false;
+    try {
+      area.select();
+      copied = document.execCommand('copy') === true;
+    } catch (err) {
+      copied = false;
+    } finally {
+      document.body.removeChild(area);
+    }
+    return copied;
   }
 
   /** Copy a deep link with the current facelet to the clipboard. */
   copyLink() {
-    const facelet = this.currentFacelet || SOLVED_FACELET;
+    const facelet = this.currentFacelet || '';
+    // currentFacelet follows the displayed state, and the displayed state can
+    // be the picker's: 54 characters where every unpainted sticker is '?', or
+    // nothing at all. Copying that wrote ?s=???... into the link, which the
+    // loader rejects as "expected 54 chars" (or, worse, hands to the backend as
+    // a cube it cannot read). Refuse and say what is missing instead.
+    if (!isCompleteFacelet(facelet)) {
+      this.setStatus(
+        'Cannot copy a link yet: the cube on screen is not complete. '
+        + 'Fill in all 54 stickers, load a facelet, or scan a cube first.',
+        'error',
+      );
+      return;
+    }
     const url = new URL(window.location.href);
     url.searchParams.set('s', facelet);
-    navigator.clipboard.writeText(url.toString())
-      .then(() => this.setStatus('Link copied!', 'success'))
-      .catch(() => this.setStatus('Copy failed', 'error'));
+    return this.copyText(url.toString(), 'Link copied!');
   }
 
   /** Load facelet from ?s= URL parameter on page load. */
@@ -1303,7 +1570,14 @@ class App {
       if (this.inspectionTimeLeft <= 0) {
         this.inspectionTimeLeft = 0;
         this.endInspection();
+        // Start the clock from this countdown itself. A second setTimeout used
+        // to do it, but endInspection() cleared that timeout when the countdown
+        // hit zero, so the status said "timer running!" while the clock stayed
+        // at 00:00.00 for the whole solve.
+        this.timer.start();
+        this.startTimerDisplay();
         this.setStatus('Inspection over — timer running!', 'info');
+        return;
       }
       this.updateInspectionDisplay();
     }, 100);
@@ -1337,10 +1611,12 @@ class App {
     el.textContent = `Inspection: ${sec}s`;
   }
 
-  invertScramble() {
+  async invertScramble() {
     if (this.history.scramble.length === 0) { this.setStatus('No scramble', 'error'); return; }
     const inverted = this.history.scramble.slice().reverse().map(invertMove);
-    this.cube.playSolution(inverted);
+    this.clearManualMoves();
+    await this.cube.playSolution(inverted);
+    this.syncRenderedFacelet();
     this.history.setScramble(inverted);
     this.updateHistoryDisplay();
     this.setStatus('Inverted', 'success');
@@ -1348,26 +1624,61 @@ class App {
 
   optimizeSolution() {
     if (this.history.solution.length === 0) { this.setStatus('No solution', 'error'); return; }
+    // The cursor holds a place in the current list; replacing the list under a
+    // half-played solution would move that place onto a different move.
+    if (this.isPlaying || this.currentMoveIndex > 0) {
+      this.setStatus('Finish or reset playback before optimizing the solution.', 'error');
+      return;
+    }
     const before = this.history.solution.length;
     const optimized = optimizeMoves(this.history.solution);
     this.history.setSolution(optimized);
+    // The history is only the text on screen; Play follows this.solution. Left
+    // stale, the cube played the unoptimized list while the history showed the
+    // shorter one.
+    this.solution = optimized.slice();
+    this.currentMoveIndex = 0;
     this.updateHistoryDisplay();
+    this.updatePlaybackDisplay();
     this.setStatus(`Optimized: ${before} to ${optimized.length} moves`, 'success');
   }
 
   clearHistory() {
+    // The history is the visible copy of this.solution, but Play follows
+    // this.solution and the cursor. Emptying only the text left the old list
+    // perfectly playable: the panel showed no moves while Play replayed them
+    // onto a cube that no longer described them. Clear the list, the cursor and
+    // the solved state with the display, and stop any playback in progress so
+    // the loop cannot carry on against a list nobody can see. pause() is used
+    // rather than clearing isPlaying by hand because it also stops the solve
+    // clock and its display, which the completion branch would otherwise do.
+    if (this.isPlaying) this.pause();
+    // A solve already on the wire would land after this Clear and put back the
+    // list the user just removed. solve() drops any reply whose request id is
+    // no longer current, so bump it here.
+    this.solveRequestId = (this.solveRequestId || 0) + 1;
+    this.solution = [];
+    this.solvedState = null;
+    this.solvedInputFacelet = null;
+    this.currentMoveIndex = 0;
     this.history.clear();
+    // MoveHistory.clear() also drops the hand-typed moves, so the Undo stack
+    // has to be emptied with them or the button would undo a move that is no
+    // longer listed.
+    this.clearManualMoves();
     this.updateHistoryDisplay();
+    this.clearPrediction();
+    this.updatePlaybackDisplay();
     this.setStatus('Cleared', 'info');
   }
 
   saveTime() {
     const elapsed = this.timer.getElapsed();
     if (elapsed <= 0) return;
-    const times = JSON.parse(localStorage.getItem('rubik-best-times') || '[]');
+    const times = this.readBestTimes();
     times.push({ time: elapsed, date: Date.now() });
     times.sort((a, b) => a.time - b.time);
-    localStorage.setItem('rubik-best-times', JSON.stringify(times.slice(0, 10)));
+    this.writeBestTimes(times.slice(0, 10));
     this.stats.addTime(elapsed);
     this.updateBestTimesDisplay();
     this.updateStatsDisplay();
@@ -1403,8 +1714,38 @@ class App {
     });
   }
 
+  /**
+   * The ten stored best times, or an empty list when the store is unusable.
+   *
+   * localStorage can throw outright (private browsing modes, blocked cookies,
+   * a file:// page), and the string it holds can stop parsing (a half-written
+   * entry, another tab, a hand edit). Both used to escape: this read runs from
+   * init() to paint the best-times list, so one bad value stopped the rest of
+   * the page booting, and saveTime() calls it at the end of every solve. A
+   * broken store should mean "no history", not a broken app.
+   */
+  readBestTimes() {
+    let parsed;
+    try {
+      parsed = JSON.parse(localStorage.getItem('rubik-best-times') || '[]');
+    } catch (err) {
+      return [];
+    }
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry) => entry && Number.isFinite(entry.time));
+  }
+
+  /** Store the best-times list, ignoring a store that will not take it. */
+  writeBestTimes(times) {
+    try {
+      localStorage.setItem('rubik-best-times', JSON.stringify(times));
+    } catch (err) {
+      // The solve still shows for this visit; there is nowhere to persist it.
+    }
+  }
+
   updateBestTimesDisplay() {
-    const times = JSON.parse(localStorage.getItem('rubik-best-times') || '[]');
+    const times = this.readBestTimes();
     this.bestTimesDisplay.innerHTML = '';
     times.slice(0, 5).forEach((entry, i) => {
       const div = document.createElement('div');
@@ -1415,7 +1756,12 @@ class App {
   }
 
   clearBestTimes() {
-    localStorage.removeItem('rubik-best-times');
+    try {
+      localStorage.removeItem('rubik-best-times');
+    } catch (err) {
+      // Nothing to remove from a store that cannot be reached; the lists are
+      // repainted empty below either way.
+    }
     this.stats.clear();
     this.updateBestTimesDisplay();
     this.updateStatsDisplay();
@@ -1434,6 +1780,41 @@ class App {
       }, 8000);
     }
   }
+  /**
+   * Honour the operating system's reduced-motion setting.
+   *
+   * This used to live in an initAccessibility() that the boot sequence no longer
+   * called, so `reducedMotion` was never assigned: every move kept animating
+   * and the speed slider stayed live for people who had asked their system not
+   * to animate things.
+   */
+  initAccessibility() {
+    const query = typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-reduced-motion: reduce)')
+      : null;
+    this.reducedMotion = Boolean(query && query.matches);
+    this.applyReducedMotion(this.reducedMotion);
+    if (query && query.addEventListener) {
+      query.addEventListener('change', (event) => {
+        this.reducedMotion = event.matches;
+        this.applyReducedMotion(event.matches);
+        this.announce(event.matches ? 'Reduced motion enabled' : 'Reduced motion disabled');
+      });
+    }
+  }
+
+  /** Make the cube jump instead of glide, and retire the speed control, or undo that. */
+  applyReducedMotion(enabled) {
+    if (enabled) {
+      this.cube.setMoveDuration(0);
+      if (this.speedSlider) this.speedSlider.disabled = true;
+    } else {
+      if (this.speedSlider) this.speedSlider.disabled = false;
+      this.cube.setMoveDuration(Number(this.speedSlider ? this.speedSlider.value : 0));
+    }
+    this.updateSpeedLabel();
+  }
+
   // The header carries a theme button and a colourblind button. Each needs a
   // preference to write somewhere and something to apply, or pressing it does
   // nothing at all, which is what these two buttons used to do.

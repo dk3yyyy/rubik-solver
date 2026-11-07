@@ -130,6 +130,19 @@ test('every getElementById in the source has that id in the markup', () => {
   assert.deepEqual(stale, [], 'these ids now have markup (or no longer exist): drop them from the list');
 });
 
+test('every button in the markup is wired to code', () => {
+  // #btn-undo shipped with markup and CSS in the undo commit but no listener
+  // and no way to become enabled, so it sat greyed out for the life of the page.
+  // A button the source never mentions cannot do anything when pressed.
+  const html = fs.readFileSync(path.join(SRC, '..', 'index.html'), 'utf8');
+  const files = fs.readdirSync(SRC).filter((name) => name.endsWith('.js'));
+  const source = files.map((name) => fs.readFileSync(path.join(SRC, name), 'utf8')).join('\n');
+  const ids = [...html.matchAll(/<button\b[^>]*\bid="([^"]+)"/g)].map((match) => match[1]);
+  assert.ok(ids.length > 10, `expected the interactive buttons in the markup, found ${ids.length}`);
+  const unwired = ids.filter((id) => !source.includes(`'${id}'`) && !source.includes(`"${id}"`));
+  assert.deepEqual(unwired, [], 'these buttons have markup but no handler in the source');
+});
+
 /**
  * The markup from a block's opening tag to its matching closing tag, so a test
  * can say *where* an element has to be and not only that it exists somewhere.

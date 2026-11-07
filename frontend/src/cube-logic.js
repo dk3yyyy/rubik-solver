@@ -317,8 +317,66 @@ export function faceletFromStickers(stickers) {
   return stickers.map((sticker) => sticker || '?').join('');
 }
 
+/**
+ * Whether `facelet` is a complete cube state: exactly 54 stickers, each one a
+ * real face letter.
+ *
+ * The input picker builds its facelet with '?' for every sticker still blank,
+ * and the displayed state now follows the picker (that is what makes Copy Link
+ * match the cube on screen). Without this check the button copied those '?'
+ * placeholders into the URL, which the loader rejects and the solver cannot
+ * read, so the link was silently useless.
+ */
+export function isCompleteFacelet(facelet) {
+  if (typeof facelet !== 'string' || facelet.length !== STICKER_COUNT) return false;
+  for (const letter of facelet) {
+    if (!FACES.includes(letter)) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether an origin is one where "the backend is not running" is the likely
+ * explanation for a failed fetch.
+ *
+ * A page served from a private address is local in every sense the person using
+ * it cares about: `http://192.168.1.20:8000` is the same machine they are
+ * standing next to, not the GitHub Pages copy. Treating only loopback as local
+ * told anyone who opened the app through a LAN address that a hosted copy
+ * cannot reach a loopback backend, and to run the app locally - which is what
+ * they were already doing.
+ */
 export function isLocalOrigin(origin) {
-  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin || '');
+  if (!origin) return false;
+  let url;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+  // An origin has no path, query or fragment; anything else is not one.
+  if (url.pathname !== '/' || url.search || url.hash) return false;
+
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host === '::1' || host.endsWith('.local')) return true;
+
+  // Only a real dotted-quad counts as an address: a public name such as
+  // 127.example.com merely starts with the loopback digits.
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (v4) {
+    const first = Number(v4[1]);
+    const second = Number(v4[2]);
+    return first === 127
+      || first === 10
+      || (first === 192 && second === 168)
+      || (first === 172 && second >= 16 && second <= 31)
+      || (first === 169 && second === 254);
+  }
+
+  // Unique-local / link-local IPv6. The colon matters: without it a domain
+  // beginning "fd" would read as a private address.
+  return host.includes(':') && /^(fc|fd|fe80:)/.test(host);
 }
 
 /**

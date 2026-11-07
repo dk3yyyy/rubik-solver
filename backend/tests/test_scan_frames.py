@@ -490,3 +490,84 @@ def test_a_frame_that_cannot_say_what_is_behind_the_cube_claims_nothing():
     result = analyse_face(frame)
     assert result["found"], result["reason"]
     assert result["colours"] == list("U" * 9), result["colours"]
+
+
+def test_background_is_measured_per_cell_not_per_run_of_memory():
+    # `_worst_cell_background` slices the nine cell interiors and then groups
+    # them by cell. The slice is not contiguous, so the grouping has to
+    # transpose first; without that, `reshape(9, -1)` walks the slice in
+    # memory order and a window holding exactly one cell of wall measured
+    # 0.375 instead of 1.0. That under-report is what let the cell-shifted
+    # crop of issue #33 through the MAX_CELL_BACKGROUND_SHARE gate, so the
+    # helper is pinned at the measurement itself: one whole cell must measure
+    # a whole cell, and a clean window must measure nothing.
+    clean = np.zeros((webcam.GRID_SAMPLE, webcam.GRID_SAMPLE), dtype=np.uint8)
+    assert webcam._worst_cell_background(clean) == 0.0
+
+    cell = webcam.GRID_SAMPLE // 3
+    one_cell = clean.copy()
+    one_cell[:cell, :cell] = 1
+    assert webcam._worst_cell_background(one_cell) == 1.0
+
+    # The shape the bad crop actually took: a whole column of cells, one cell
+    # wide, along the side of the window.
+    left_column = clean.copy()
+    left_column[:, :cell] = 1
+    assert webcam._worst_cell_background(left_column) == 1.0
+
+
+@pytest.mark.parametrize("coverage, angle, background", [
+    # The eight frames of issue #33. The first pair is 70% coverage at 32 and
+    # 45 degrees: a face held close and tilted, which is how the scanner asks
+    # the user to hold it. The other six are 90% coverage at 21 and 32 degrees
+    # on dark, mid and bright grey - the frames master read as UURUDLUUR at
+    # confidence 1.0, from a crop one cell out of step whose left column was
+    # the grey wall, which the classifier calls white.
+    (0.7, 32, 245), (0.7, 45, 245),
+    (0.9, 21, 200), (0.9, 21, 120), (0.9, 21, 245),
+    (0.9, 32, 200), (0.9, 32, 120), (0.9, 32, 245),
+])
+def test_a_high_coverage_tilted_face_is_never_confident_and_wrong(
+        coverage, angle, background):
+    frame = jpeg_roundtrip(make_frame(SCRAMBLED, coverage=coverage, angle=angle,
+                                      background=(background, background, background)))
+    result = analyse_face(frame)
+    # The invariant this frame reader owes the scan: if it calls the frame a
+    # face, the nine letters are that face. A refusal is honest; a plausible
+    # wrong cube read at confidence 1.0 is not.
+    assert not result["found"] or result["colours"] == SCRAMBLED, (
+        coverage, angle, background, result["colours"])
+    # These eight are readable, though: the aligned crop at the face's own
+    # size and tilt passes every gate, so a refusal here would be the search
+    # losing the face again rather than the frame being ambiguous.
+    assert result["found"], (coverage, angle, background, result["reason"])
+
+
+@pytest.mark.parametrize("letters, options, quality", [
+    # A frame whose accepted crop put its far column on the wall: one and a
+    # half cells to the side of a face held at 88% of the frame, with plastic on
+    # all four sides of every sticker. Its worst cell measured 0.711 background
+    # against a limit of 0.75, so the background gate let it through and the nine
+    # "stickers" were six stickers and three cells of desk. These four are the
+    # confident-wrong reads a random sweep of 240 frames turned up; all four have
+    # a cell that is 71-75% room, and no legitimate crop measured above 0.55.
+    ("DBFDFBLBF", dict(coverage=0.88, angle=11.5, background=(200, 200, 200),
+                       brightness=1.08, noise=8, gap=4, ring=True), 95),
+    ("UUDDRBLRD", dict(coverage=0.68, angle=44.3, background=(120, 160, 190),
+                       brightness=0.98, noise=8, gap=0, ring=False), 95),
+    ("FFFRUBRFU", dict(coverage=0.86, angle=42.8, background=(120, 160, 190),
+                       brightness=0.91, noise=8, gap=5, ring=True), 90),
+    ("LFURULDLL", dict(coverage=0.89, angle=10.2, background=(90, 90, 140),
+                       brightness=0.96, noise=8, gap=5, ring=True), 95),
+])
+def test_a_crop_whose_worst_cell_is_a_quarter_room_is_never_read_as_stickers(
+        letters, options, quality):
+    # The invariant is the same one the issue #33 frames are held to: a refusal
+    # is honest, nine plausible letters that are not the face are not. These
+    # frames are where the background gate is the only thing that can tell; the
+    # crop's plastic lines and colour changes are all genuinely present, because
+    # they are the face's own, seen a cell out of step.
+    frame = jpeg_roundtrip(make_frame(list(letters), **options), quality=quality)
+    result = analyse_face(frame)
+    assert not result["found"] or result["colours"] == list(letters), (
+        letters, result["colours"], result["coverage"], result["offset"])
