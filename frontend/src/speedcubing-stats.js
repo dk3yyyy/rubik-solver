@@ -4,20 +4,52 @@ export class SpeedcubingStats {
     this.storageKey = storageKey;
   }
 
+  /**
+   * The stored solve list, or an empty one when the store cannot be used.
+   *
+   * localStorage throws outright in some private browsing modes, with blocked
+   * cookies, or on a file:// page; getItem can also return JSON that no longer
+   * parses (a half-written entry, another tab, a hand edit). Both used to
+   * escape from here, and getTimes() runs during startup for the ao5/ao12 card,
+   * so one bad value took the whole page down with it.
+   */
   getTimes() {
-    return JSON.parse(localStorage.getItem(this.storageKey) || '[]');
+    let raw;
+    try {
+      raw = localStorage.getItem(this.storageKey);
+    } catch (err) {
+      return [];
+    }
+    if (!raw) return [];
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      return [];
+    }
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry) => entry && Number.isFinite(entry.time));
   }
 
   addTime(ms) {
     if (ms <= 0) return;
     const times = this.getTimes();
     times.push({ time: ms, date: Date.now() });
-    localStorage.setItem(this.storageKey, JSON.stringify(times));
+    try {
+      localStorage.setItem(this.storageKey, JSON.stringify(times));
+    } catch (err) {
+      // Storage full or unavailable: the solve still counts for this visit,
+      // there is simply nowhere to keep it.
+    }
     return times;
   }
 
   clear() {
-    localStorage.removeItem(this.storageKey);
+    try {
+      localStorage.removeItem(this.storageKey);
+    } catch (err) {
+      // Nothing to clear in a store that cannot be reached.
+    }
   }
 
   /**

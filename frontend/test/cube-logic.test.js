@@ -34,6 +34,7 @@ import {
   framesLookIdentical,
   invertMove,
   invertSequence,
+  isCompleteFacelet,
   isLocalOrigin,
   movePlaybackState,
   moveToRotation,
@@ -237,6 +238,18 @@ test('an unfilled picker produces a facelet the solver will reject', () => {
   assert.ok(faceletFromStickers(stickers).includes('?'));
 });
 
+test('a complete facelet is the only thing Copy Link will carry', () => {
+  // Copy Link follows the displayed state, and the picker shows its unfinished
+  // self: 54 characters, but with '?' wherever a sticker is still blank. The
+  // check is about the shape of a state, not whether the solver will accept it.
+  assert.equal(isCompleteFacelet(SOLVED), true);
+  assert.equal(isCompleteFacelet('U'.repeat(53) + '?'), false);
+  assert.equal(isCompleteFacelet('U'.repeat(53)), false);
+  assert.equal(isCompleteFacelet('X'.repeat(54)), false);
+  assert.equal(isCompleteFacelet(null), false);
+  assert.equal(isCompleteFacelet(undefined), false);
+});
+
 test('a network failure says the backend is not running', () => {
   const message = describeApiError(new TypeError('Failed to fetch'), 'http://localhost:8000', 'http://localhost:5173');
   assert.ok(message.includes('Cannot reach the solver backend at http://localhost:8000'), message);
@@ -265,6 +278,35 @@ test('isLocalOrigin recognises the local addresses', () => {
   for (const origin of ['https://dk3yyyy.github.io', 'https://example.com', '', null]) {
     assert.ok(!isLocalOrigin(origin), String(origin));
   }
+});
+
+test('a page on the local network is not told it is the hosted copy', () => {
+  // Opening the app at http://192.168.1.20:8000 is running it locally: the
+  // backend is a process on that machine, not a loopback service a public page
+  // is forbidden to call. Only loopback counted as local, so a LAN visitor who
+  // hit a stopped server was told browsers block hosted copies from reaching
+  // machines, and to run the app locally - which they already were.
+  for (const origin of [
+    'http://192.168.1.20:8000',
+    'http://10.0.0.5:8000',
+    'http://172.20.1.2:8000',
+    'http://raspberrypi.local:8000',
+    'http://[fd00::1]:8000',
+  ]) {
+    assert.ok(isLocalOrigin(origin), origin);
+  }
+  // Public names that merely begin with private-range letters are not local.
+  for (const origin of ['https://fdic.gov', 'https://127.example.com']) {
+    assert.ok(!isLocalOrigin(origin), origin);
+  }
+
+  const message = describeApiError(
+    new TypeError('Failed to fetch'),
+    null,
+    'http://192.168.1.20:8000',
+  );
+  assert.ok(message.includes('Cannot reach the solver backend'), message);
+  assert.ok(!message.includes('hosted copy'), message);
 });
 
 test('solver errors are passed through unchanged', () => {
