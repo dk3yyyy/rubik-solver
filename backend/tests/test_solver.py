@@ -53,3 +53,58 @@ def test_scramble_avoids_repeating_a_face():
         scramble, _ = solver.random_scramble()
         faces = [move[0] for move in scramble.split()]
         assert all(a != b for a, b in zip(faces, faces[1:]))
+
+
+def _relabel(facelet: str) -> str:
+    """The same cube with its colours renamed, e.g. as a whole-cube rotation."""
+    return facelet.translate(str.maketrans("URFDLB", "RFD" + "LB" + "U"))
+
+
+def test_a_relabelled_solved_cube_is_already_solved():
+    # The validator accepts a cube whose centres carry a different colour
+    # scheme, so the solver has to read it the same way. The library parses
+    # facelets by their literal letters, so without relabelling it saw a
+    # scrambled cube and returned a sequence that solved nothing.
+    assert solver.solve_facelet(_relabel(SOLVED)) == []
+
+
+def test_a_relabelled_scramble_solves_back_to_solved():
+    from validator import is_solved
+
+    _, state = solver.random_scramble()
+    relabelled = _relabel(state)
+    assert validate_facelet(relabelled)[0] is True
+
+    moves = solver.solve_facelet(relabelled)
+    assert moves, "solver returned no moves for a valid relabelled scramble"
+    assert is_solved(solver.apply_moves(relabelled, " ".join(moves)))
+
+
+def test_init_is_retried_after_a_transient_table_build_failure(monkeypatch):
+    # A failed build is often transient (memory pressure during a deploy
+    # start). Before, only the startup call ever ran, so one failure left every
+    # solver endpoint answering 503 until the process was restarted.
+    import time
+
+    calls = []
+    real_init_solver = solver.init_solver
+
+    def flaky():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("tables failed to build")
+        return real_init_solver()
+
+    monkeypatch.setattr(solver, "init_solver", flaky)
+    monkeypatch.setattr(solver, "_solver_ready", False)
+    monkeypatch.setattr(solver, "_last_failure", None, raising=False)
+
+    assert solver.init() is False
+    # The cooldown stops a permanently broken build from being retried on
+    # every request; after it elapses the retry is allowed.
+    assert solver.init() is False
+    assert len(calls) == 1
+
+    monkeypatch.setattr(solver, "_last_failure", time.monotonic() - getattr(solver, "_RETRY_AFTER_FAILURE", 5.0) - 1, raising=False)
+    assert solver.init() is True
+    assert len(calls) == 2

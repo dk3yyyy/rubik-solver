@@ -444,5 +444,141 @@ def test_a_frame_holding_a_cell_of_the_wall_is_not_answered_with_a_cube_state(cl
         "images": [base64_frame(SCRAMBLED, coverage=0.7, angle=32,
                                 background=(245, 245, 245))] * 6})
     assert response.status_code == 422
+    # The frame now reads as a cube face, so the scan names the frames whose
+    # centres disagree instead of saying no face was found. What matters is
+    # that a wall never becomes a cube state and the message points at frame 1.
     detail = response.json()["detail"]
-    assert "No cube face was found in frame 1 (U)" in detail, detail
+    assert "frame 1" in detail, detail
+
+
+def _relabelled(facelet: str) -> str:
+    """The same cube with its colours renamed, e.g. as a whole-cube rotation."""
+    return facelet.translate(str.maketrans("URFDLB", "RFD" + "LB" + "U"))
+
+
+def test_solve_accepts_a_cube_under_another_colour_scheme(client):
+    # The validator accepts a relabelled cube (a whole-cube rotation), so solve
+    # must too. Before, the solver read the raw letters, produced a sequence
+    # that solved nothing, and the self-check answered 500 for a valid cube.
+    relabelled = _relabelled(scrambled_state(client))
+    response = client.post("/api/solve", json={"state": relabelled})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["move_count"] == len(body["solution"].split())
+
+
+def test_step_on_a_rotated_solved_cube_says_it_is_already_solved(client):
+    # Pre-fix the solver claimed a 16-move "solution" for this cube, so the API
+    # played back moves that did not solve it instead of saying it was done.
+    response = client.post("/api/step", json={"state": _relabelled(SOLVED), "step": 0})
+    assert response.status_code == 422
+    assert "already solved" in response.json()["detail"]
+
+
+def test_detect_rejects_an_empty_upload(client):
+    # cv2.imdecode raises on an empty buffer, which used to escape as a 500.
+    response = client.post("/api/detect", files={"file": ("face.jpg", b"", "image/jpeg")})
+    assert response.status_code == 400
+    assert "empty" in response.json()["detail"].lower()
+
+
+def test_detect_does_not_read_an_oversized_upload_into_memory():
+    # The size check used to run after await file.read() had already loaded the
+    # whole upload, so a huge body was a memory-exhaustion vector. Reading with
+    # a bound is the only way the check protects the process.
+    import asyncio
+
+    class OversizedUpload:
+        def __init__(self):
+            self.read_sizes = []
+
+        async def read(self, size=-1):
+            self.read_sizes.append(size)
+            if size is None or size < 0:
+                raise AssertionError("the endpoint read the whole upload into memory")
+            return b"x" * size
+
+    upload = OversizedUpload()
+    with pytest.raises(main.HTTPException) as caught:
+        asyncio.run(main.detect_single_face(upload))
+    assert caught.value.status_code == 413
+    assert upload.read_sizes == [5 * 1024 * 1024 + 1]
+
+
+def test_detect_frame_rejects_an_oversized_payload(client):
+    # The overlay polls this endpoint twice a second, and unlike the scan it had
+    # no cap at all: any caller could hand it an arbitrarily large base64 blob.
+    # Four As per group keeps the string valid base64, so this is the cap
+    # talking rather than the decoder.
+    response = client.post(
+        "/api/detect-frame", json={"image": "A" * (2 * 1024 * 1024 + 4)}
+    )
+    assert response.status_code == 413
+    assert "too large" in response.json()["detail"].lower()
+
+
+def test_a_solver_that_failed_at_startup_is_retried_on_the_next_request(client, monkeypatch):
+    # The lifespan build is the only one there is, so a failure there left every
+    # solver endpoint answering 503 for the life of the process.
+    import solver as solver_module
+
+    monkeypatch.setattr(solver_module, "_solver_ready", False)
+    monkeypatch.setattr(solver_module, "_last_failure", None)
+    monkeypatch.setattr(solver_module, "init_solver", lambda: None)
+
+    assert client.get("/api/scramble").status_code == 200
+
+
+def test_rate_limited_responses_keep_their_cors_headers(client, monkeypatch):
+    # The limiter answers 429 itself. If it sits outside CORSMiddleware, that
+    # response never gets Access-Control-Allow-Origin, so a browser sees an
+    # opaque network failure instead of the detail and Retry-After that say how
+    # long to wait.
+    monkeypatch.setattr(main, "RATE_LIMIT_MAX", 1)
+    headers = {"Origin": "https://example.com"}
+
+    assert client.post("/api/validate", json={"state": SOLVED}, headers=headers).status_code == 200
+    blocked = client.post("/api/validate", json={"state": SOLVED}, headers=headers)
+    assert blocked.status_code == 429
+    assert "access-control-allow-origin" in blocked.headers
+
+
+def test_a_minute_of_overlay_polling_does_not_throttle_the_following_solve(client):
+    # The live overlay polls /api/detect-frame every 500 ms while the camera is
+    # open, so half a minute of framing already spends 60 of the shared
+    # per-client budget. At the old 60/min default the validate that follows
+    # the capture was answered 429, and the user was told the scan failed.
+    frame = base64_face("U" * 9)
+    for _ in range(60):  # 30 seconds at the overlay's cadence
+        assert client.post("/api/detect-frame", json={"image": frame}).status_code == 200
+
+    assert client.post("/api/validate", json={"state": SOLVED}).status_code == 200
+
+
+def test_an_oversized_request_body_is_refused_before_it_is_parsed(client):
+    # The per-image caps run only after the whole JSON body has been parsed,
+    # so without a body cap one request could still make the parser allocate as
+    # much as the caller cared to send. A full six-image scan is ~12.6 MB.
+    body = (
+        '{"state": "' + SOLVED + '", "padding": "'
+        + "x" * (16 * 1024 * 1024) + '"}'
+    )
+    response = client.post(
+        "/api/solve", content=body, headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 413
+    assert "too large" in response.json()["detail"].lower()
+
+
+def test_step_refuses_a_sequence_that_does_not_solve(client, monkeypatch):
+    # The playback endpoint had no self-check, so a broken table set would have
+    # been reported as a step-by-step solution, complete with is_complete=true
+    # for a cube that never got solved. /api/solve already refused it.
+    import solver as solver_module
+
+    monkeypatch.setattr(solver_module, "solve_facelet", lambda state, max_depth=22: ["R"])
+    response = client.post(
+        "/api/step", json={"state": scrambled_state(client), "step": 0}
+    )
+    assert response.status_code == 500
+    assert "does not solve" in response.json()["detail"]
