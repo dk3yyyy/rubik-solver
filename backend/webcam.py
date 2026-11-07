@@ -146,11 +146,23 @@ BACKGROUND_TOLERANCE = 8
 # How much of one of a crop's nine cells may be background before the crop is
 # reading the room. A cell of a real face is sticker; a crop a cell out of step
 # has a whole cell of wall among its nine. The value comes from measurement, not
-# from judgement: the frames this must not break - the tilted-face fixtures in
-# the suite - measure up to 0.5 in their worst cell, and the crop this is for -
-# a window pushed against the frame edge, holding a whole cell of wall - measures
-# 1.0. Anything between separates them; 0.75 leaves room either side.
-MAX_CELL_BACKGROUND_SHARE = 0.75
+# from judgement, and the measurement has to group the cells correctly first
+# (see _worst_cell_background): over the suite's tilted, off-centre, white-wall,
+# wood-desk, touching-sticker and ring fixtures the worst cell of an accepted
+# legitimate crop measures 0.234; a solid-colour face at 0.8 coverage whose crop
+# is half a cell wider than the face measures 0.500; and the crop this is for -
+# a window a whole cell out of step, holding a column of wall - measured 0.941
+# to 1.0 on the four issue #33 frames the old search read wrongly.
+#
+# Between those two populations sit the crops that only *just* miss the face: a
+# random sweep of 240 frames found four confident-wrong reads whose worst cell
+# was 0.711 to 0.75 background - a window one and a half cells to one side, with
+# its far column on the wall - and no legitimate crop in the sweep above 0.55.
+# The limit was 0.75, which let exactly those through (0.75 itself is not
+# greater than 0.75, so a cell that was three quarters wall passed). At 0.65
+# those four are read right or refused, the 228-frame battery keeps all 222 of
+# its right reads, and the margin over the worst legitimate crop is still 0.15.
+MAX_CELL_BACKGROUND_SHARE = 0.65
 # Sticker gaps are near-black plastic. How much of a face crop they cover is
 # roughly the same for any cube - the plastic lines between nine stickers - so
 # the score rewards a crop that looks like that and penalises one that does not:
@@ -380,8 +392,13 @@ def _worst_cell_background(window: Optional[np.ndarray]) -> float:
     small = cv2.resize(window, (GRID_SAMPLE, GRID_SAMPLE), interpolation=cv2.INTER_NEAREST)
     cell = GRID_SAMPLE // 3
     pad = cell // 4
-    interiors = small.reshape(3, cell, 3, cell)[:, pad:cell - pad, :, pad:cell - pad]
-    interiors = interiors.reshape(9, -1)
+    # Slice each cell's interior in the natural (row, col) layout, then group by
+    # cell as _crop_stats does. The slice is non-contiguous, so reshaping it
+    # without this transpose groups pixels by memory order instead of by cell:
+    # a window with exactly one cell of background measured 0.375, not 1.0, and
+    # the cell-shifted crop this gate exists for walked straight through.
+    blocks = small.reshape(3, cell, 3, cell)[:, pad:cell - pad, :, pad:cell - pad]
+    interiors = blocks.transpose(0, 2, 1, 3).reshape(9, -1)
     return float(max(np.count_nonzero(row) / row.size for row in interiors))
 
 
@@ -815,7 +832,18 @@ def analyse_face(image: Image) -> dict:
                           size / short, 0.0))
 
     # 3. A grid in the middle of the frame, for a face with no detectable edge.
-    centre_seed: Optional[Tuple[tuple, float, float, float, float]] = None
+    #    The scanner asks the user to fill the frame with one face, so a
+    #    dead-centre crop deserves a place in the refinement whatever the rest of
+    #    the frame scores. There is one such seed per size rather than one
+    #    overall: on a tilted face every dead-centre size scores no internal
+    #    lines at angle 0, because the grid is not aligned with the stickers at
+    #    all, so choosing the best of them by that score is a coin toss. Keeping
+    #    only the winner is how the aligned crop at the face's own size stopped
+    #    being generated: at 0.9 coverage the winner was the 0.28 window, a third
+    #    of the face, and the whole search then had no dead-centre candidate at
+    #    the size the face actually was (issue #33). The angle loop below tries
+    #    each size at the rotations the detected stickers suggest.
+    centre_seeds: List[Tuple[tuple, float, float, float, float]] = []
     for scale in GRID_SCALES:
         for dx in GRID_POSITION_OFFSETS:
             for dy in GRID_POSITION_OFFSETS:
@@ -826,11 +854,8 @@ def analyse_face(image: Image) -> dict:
                 stats = _crop_stats(crop)
                 entry = (_score(stats, scale, 0.0), dx, dy, scale, 0.0)
                 seeds.append(entry)
-                if dx == 0.0 and dy == 0.0 and (centre_seed is None or entry[0] > centre_seed[0]):
-                    # The scanner asks the user to fill the frame with one face,
-                    # so dead centre at the best size deserves a place in the
-                    # refinement whatever the rest of the frame scores.
-                    centre_seed = entry
+                if dx == 0.0 and dy == 0.0:
+                    centre_seeds.append(entry)
     seeds.sort(key=lambda item: item[0], reverse=True)
 
     # 4. The best few positions, refined: a fraction of a cell either way, a few
@@ -846,9 +871,11 @@ def analyse_face(image: Image) -> dict:
         seed_picks.append((dx, dy, scale, base))
         if len(seed_picks) >= FINE_SEEDS:
             break
-    if centre_seed is not None and not any(abs(dx) < 0.05 and abs(dy) < 0.05
-                                           for dx, dy, _, _ in seed_picks):
-        seed_picks.append((centre_seed[1], centre_seed[2], centre_seed[3], centre_seed[4]))
+    for entry in centre_seeds:
+        if any(abs(entry[1] - ox) < 0.05 and abs(entry[2] - oy) < 0.05
+               and abs(entry[3] - os) < 0.10 for ox, oy, os, _ in seed_picks):
+            continue
+        seed_picks.append((entry[1], entry[2], entry[3], entry[4]))
 
     shape_angles: List[float] = []
     for quad in quadrangles:
